@@ -1,0 +1,4 @@
+.stage2-overlay {
+  z-index: 40;
+  background-color: var(--bg-primary);
+}
