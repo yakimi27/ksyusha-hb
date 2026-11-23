@@ -9,6 +9,10 @@ const app = {
     if (typeof stage1 !== 'undefined') {
       stage1.init();
     }
+
+    if (typeof stage2 !== 'undefined' && typeof stage2.preloadAssets === 'function') {
+      stage2.preloadAssets();
+    }
   },
 
   goToStage(stageNumber) {
