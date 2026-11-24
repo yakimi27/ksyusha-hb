@@ -42,6 +42,8 @@ const stage3 = {
   asciiFlowers: [],
   angelInstance: null,
   angelObserver: null,
+  heartInstance: null,
+  heartObserver: null,
   asciiCharRamp: " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
   revealObserver: null,
   timers: [],
@@ -81,11 +83,13 @@ const stage3 = {
       this.resizeCanvas();
       this.initGalleryAsciiFlowers();
       this.initWeepingAngel();
+      this.initFooterAsciiHeart();
       this.isInitialized = true;
     } else {
       this.updateViewportMetrics();
       this.resizeGalleryAsciiFlowers();
       this.resizeWeepingAngel();
+      this.resizeFooterAsciiHeart();
     }
 
     window.scrollTo(0, 0);
@@ -204,6 +208,7 @@ const stage3 = {
 
     this.setText('stage3-wish-granted', i18n.t('stage3.candleWishGranted'));
     this.setText('stage3-wish-sub', i18n.t('stage3.candleWishSub'));
+    this.setText('stage3-footer-author', i18n.t('stage3.footerAuthor'));
   },
 
   setText(elementId, value) {
@@ -273,6 +278,7 @@ const stage3 = {
         this.resizeCanvas();
         this.resizeGalleryAsciiFlowers();
         this.resizeWeepingAngel();
+        this.resizeFooterAsciiHeart();
         if (!this.parallaxRafId && this.isActive && this.targetScrollY <= this.heroHeight * 1.45) {
           this.startParallaxLoop();
         }
@@ -2706,6 +2712,372 @@ const stage3 = {
         const part = inst.partBuffer[idx];
         const ch = ramp[inst.charBuffer[idx]];
         const color = colorLut[part * 23 + qIdx];
+
+        if (color !== lastStyle) {
+          ctx.fillStyle = color;
+          lastStyle = color;
+        }
+
+        ctx.fillText(ch, c * cellW + halfW, yPos);
+      }
+    }
+  },
+
+  initFooterAsciiHeart() {
+    if (!this.stageElement) {
+      return;
+    }
+
+    const canvas = document.getElementById('stage3-heart-canvas');
+    if (!canvas) {
+      return;
+    }
+
+    const ctx = canvas.getContext('2d', { alpha: true });
+    const points = this.generateFooterHeartPoints();
+
+    this.heartInstance = {
+      canvas,
+      ctx,
+      points,
+      width: 0,
+      height: 0,
+      dpr: 1,
+      cols: 0,
+      rows: 0,
+      cellW: 4.0,
+      cellH: 6.8,
+      zBuffer: null,
+      lumBuffer: null,
+      charBuffer: null,
+      colorLut: this.buildHeartColorLut(),
+      yaw: 0.35,
+      pitch: -0.16,
+      roll: 0.0,
+      spinPhase: 0,
+      isVisible: false,
+      rafId: null
+    };
+
+    this.setupFooterHeartMetrics();
+    this.renderFooterHeartFrame();
+
+    if ('IntersectionObserver' in window && !this.prefersReducedMotion) {
+      this.heartObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!this.heartInstance) {
+            return;
+          }
+          if (entry.isIntersecting) {
+            this.heartInstance.isVisible = true;
+            this.startFooterHeartLoop();
+          } else {
+            this.heartInstance.isVisible = false;
+            if (this.heartInstance.rafId) {
+              cancelAnimationFrame(this.heartInstance.rafId);
+              this.heartInstance.rafId = null;
+            }
+          }
+        });
+      }, {
+        threshold: 0.05
+      });
+
+      this.heartObserver.observe(canvas);
+    } else if (!this.prefersReducedMotion) {
+      this.heartInstance.isVisible = true;
+      this.startFooterHeartLoop();
+    }
+  },
+
+  resizeFooterAsciiHeart() {
+    if (!this.heartInstance) {
+      return;
+    }
+    this.setupFooterHeartMetrics();
+    this.renderFooterHeartFrame();
+  },
+
+  setupFooterHeartMetrics() {
+    const inst = this.heartInstance;
+    if (!inst || !inst.canvas) {
+      return;
+    }
+
+    const rect = inst.canvas.getBoundingClientRect();
+    const w = Math.max(76, Math.floor(rect.width || 96));
+    const h = Math.max(72, Math.floor(rect.height || 92));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    inst.dpr = dpr;
+    inst.width = w;
+    inst.height = h;
+    inst.canvas.width = Math.floor(w * dpr);
+    inst.canvas.height = Math.floor(h * dpr);
+    inst.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    inst.cellW = 3.8;
+    inst.cellH = 6.4;
+    inst.cols = Math.max(18, Math.floor(w / inst.cellW));
+    inst.rows = Math.max(12, Math.floor(h / inst.cellH));
+
+    const total = inst.cols * inst.rows;
+    inst.zBuffer = new Float32Array(total);
+    inst.lumBuffer = new Float32Array(total);
+    inst.charBuffer = new Uint16Array(total);
+
+    const fontPx = Math.round(inst.cellH * 1.02);
+    inst.ctx.font = `700 ${fontPx}px ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", "Courier New", monospace`;
+    inst.ctx.textAlign = 'center';
+    inst.ctx.textBaseline = 'middle';
+  },
+
+  startFooterHeartLoop() {
+    const inst = this.heartInstance;
+    if (!inst || inst.rafId) {
+      return;
+    }
+
+    const step = () => {
+      if (!this.isActive || !inst.isVisible) {
+        inst.rafId = null;
+        return;
+      }
+
+      inst.yaw += 0.026;
+      inst.spinPhase += 0.032;
+      inst.roll = Math.sin(inst.spinPhase) * 0.07;
+
+      this.renderFooterHeartFrame();
+      inst.rafId = requestAnimationFrame(step);
+    };
+
+    inst.rafId = requestAnimationFrame(step);
+  },
+
+  generateFooterHeartPoints() {
+    const points = [];
+    const evalHeart = (u, v) => {
+      const t = u * Math.PI * 2;
+      const phi = (v - 0.5) * Math.PI;
+      const cosPhi = Math.cos(phi);
+      const sinPhi = Math.sin(phi);
+
+      const sinT = Math.sin(t);
+      const hx = 16 * sinT * sinT * sinT;
+      const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+
+      const x = (hx / 16) * cosPhi;
+      const y = ((hy + 2.2) / 16) * cosPhi;
+      const z = 0.56 * sinPhi * (0.42 + 0.58 * cosPhi);
+
+      return { x, y, z };
+    };
+
+    const uSteps = 72;
+    const vSteps = 32;
+    const eps = 0.004;
+
+    for (let iu = 0; iu <= uSteps; iu++) {
+      const u = iu / uSteps;
+      for (let iv = 0; iv <= vSteps; iv++) {
+        const v = iv / vSteps;
+        const p = evalHeart(u, v);
+        const pu = evalHeart(u + eps, v);
+        const pv = evalHeart(u, Math.min(1, v + eps));
+
+        const tx = pu.x - p.x;
+        const ty = pu.y - p.y;
+        const tz = pu.z - p.z;
+
+        const bx = pv.x - p.x;
+        const by = pv.y - p.y;
+        const bz = pv.z - p.z;
+
+        let nx = ty * bz - tz * by;
+        let ny = tz * bx - tx * bz;
+        let nz = tx * by - ty * bx;
+
+        const outDot = nx * p.x + ny * p.y + nz * p.z;
+        if (outDot < 0) {
+          nx = -nx;
+          ny = -ny;
+          nz = -nz;
+        }
+
+        const len = Math.hypot(nx, ny, nz) || 1;
+        points.push({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          nx: nx / len,
+          ny: ny / len,
+          nz: nz / len
+        });
+      }
+    }
+
+    return points;
+  },
+
+  buildHeartColorLut() {
+    const lut = new Array(23);
+    for (let q = 0; q <= 22; q++) {
+      const l = q / 22;
+      const r = Math.round(135 + 120 * Math.pow(l, 0.72));
+      const g = Math.round(138 + 117 * Math.pow(l, 0.74));
+      const b = Math.round(148 + 107 * Math.pow(l, 0.70));
+      lut[q] = `rgb(${r},${g},${b})`;
+    }
+    return lut;
+  },
+
+  renderFooterHeartFrame() {
+    const inst = this.heartInstance;
+    if (!inst || !inst.ctx || !inst.zBuffer) {
+      return;
+    }
+
+    const cols = inst.cols;
+    const rows = inst.rows;
+    inst.zBuffer.fill(-1e9);
+
+    const cosY = Math.cos(inst.yaw);
+    const sinY = Math.sin(inst.yaw);
+    const cosX = Math.cos(inst.pitch);
+    const sinX = Math.sin(inst.pitch);
+    const cosZ = Math.cos(inst.roll);
+    const sinZ = Math.sin(inst.roll);
+
+    const keyLx = 0.52;
+    const keyLy = 0.68;
+    const keyLz = -0.51;
+
+    const fillLx = -0.60;
+    const fillLy = -0.25;
+    const fillLz = -0.76;
+
+    const hz = -keyLz + 1;
+    const invHLen = 1 / Math.hypot(keyLx, keyLy, hz);
+    const halfLx = keyLx * invHLen;
+    const halfLy = keyLy * invHLen;
+    const halfLz = hz * invHLen;
+
+    const fovScale = Math.min(inst.width, inst.height) * 1.32;
+    const camDist = 3.5;
+
+    const invCellW = 1 / inst.cellW;
+    const invCellH = 1 / inst.cellH;
+    const ramp = this.asciiCharRamp;
+    const rampMax = ramp.length - 1;
+
+    const pts = inst.points;
+    const nPts = pts.length;
+
+    for (let i = 0; i < nPts; i++) {
+      const p = pts[i];
+
+      const x1 = p.x * cosY + p.z * sinY;
+      const z1 = -p.x * sinY + p.z * cosY;
+      const y1 = p.y;
+
+      const x2 = x1 * cosZ - y1 * sinZ;
+      const y2 = x1 * sinZ + y1 * cosZ;
+      const z2 = z1;
+
+      const y3 = y2 * cosX - z2 * sinX;
+      const z3 = y2 * sinX + z2 * cosX;
+      const x3 = x2;
+
+      const depth = camDist - z3;
+      if (depth <= 0.4) {
+        continue;
+      }
+
+      const proj = fovScale / depth;
+      const screenX = inst.width * 0.5 + x3 * proj;
+      const screenY = inst.height * 0.50 - y3 * proj;
+
+      const col = (screenX * invCellW) | 0;
+      const row = (screenY * invCellH) | 0;
+
+      if (col < 0 || col >= cols || row < 0 || row >= rows) {
+        continue;
+      }
+
+      const idx = row * cols + col;
+      if (z3 <= inst.zBuffer[idx]) {
+        continue;
+      }
+
+      const nx1 = p.nx * cosY + p.nz * sinY;
+      const nz1 = -p.nx * sinY + p.nz * cosY;
+      const ny1 = p.ny;
+
+      const nx2 = nx1 * cosZ - ny1 * sinZ;
+      const ny2 = nx1 * sinZ + ny1 * cosZ;
+      const nz2 = nz1;
+
+      const ny3 = ny2 * cosX - nz2 * sinX;
+      const nz3 = ny2 * sinX + nz2 * cosX;
+      const nx3 = nx2;
+
+      let diffKey = nx3 * keyLx + ny3 * keyLy - nz3 * keyLz;
+      if (diffKey < 0) {
+        diffKey = -diffKey * 0.35;
+      }
+
+      let diffFill = nx3 * fillLx + ny3 * fillLy - nz3 * fillLz;
+      if (diffFill < 0) {
+        diffFill = 0;
+      }
+
+      const absNz = nz3 < 0 ? -nz3 : nz3;
+      const rimBase = 1 - (absNz > 1 ? 1 : absNz);
+      const rim = rimBase * rimBase * 0.55;
+
+      const specDot = nx3 * halfLx + ny3 * halfLy + nz3 * halfLz;
+      let spec = 0;
+      if (specDot > 0) {
+        const s2 = specDot * specDot;
+        const s4 = s2 * s2;
+        const s8 = s4 * s4;
+        spec = s8 * s8 * 0.52;
+      }
+
+      let lum = 0.16 + diffKey * 0.62 + diffFill * 0.22 + rim + spec;
+      lum = lum < 0.08 ? 0.08 : (lum > 1.0 ? 1.0 : lum);
+
+      const charIdx = Math.min(rampMax, Math.max(2, (lum * rampMax) | 0));
+
+      inst.zBuffer[idx] = z3;
+      inst.lumBuffer[idx] = lum;
+      inst.charBuffer[idx] = charIdx;
+    }
+
+    const ctx = inst.ctx;
+    ctx.clearRect(0, 0, inst.width, inst.height);
+
+    const cellW = inst.cellW;
+    const cellH = inst.cellH;
+    const halfW = cellW * 0.5;
+    const halfH = cellH * 0.5;
+    const colorLut = inst.colorLut;
+    let lastStyle = '';
+
+    for (let r = 0; r < rows; r++) {
+      const rowOffset = r * cols;
+      const yPos = r * cellH + halfH;
+
+      for (let c = 0; c < cols; c++) {
+        const idx = rowOffset + c;
+        if (inst.zBuffer[idx] <= -1e8) {
+          continue;
+        }
+
+        const qIdx = (inst.lumBuffer[idx] * 22) | 0;
+        const ch = ramp[inst.charBuffer[idx]];
+        const color = colorLut[qIdx];
 
         if (color !== lastStyle) {
           ctx.fillStyle = color;

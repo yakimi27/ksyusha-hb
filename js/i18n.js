@@ -81,7 +81,8 @@ const i18n = {
         candleAction: "Задути свічку",
         candleExtinguishedAction: "Свічку погашено",
         candleWishGranted: "Почув, запишемо на олівчик. Роднєнька, нехай твоє найзаповітніше бажання обов'язково здійсниться!",
-        candleWishSub: "З 18-річчям!"
+        candleWishSub: "З 18-річчям!",
+        footerAuthor: "Від Артема — Ксенії"
       }
     },
     ru: {
@@ -163,7 +164,8 @@ const i18n = {
         candleAction: "Задуть свечу",
         candleExtinguishedAction: "Свеча погашена",
         candleWishGranted: "Услышал, запишем на карандашик. Родная, пусть твоё самое заветное желание обязательно исполнится!",
-        candleWishSub: "С 18-летием!"
+        candleWishSub: "С 18-летием!",
+        footerAuthor: "От Артема — Ксюше"
       }
     }
   },
