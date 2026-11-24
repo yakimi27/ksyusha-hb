@@ -17,6 +17,7 @@ const stage2 = {
   isInitialized: false,
   lastTouchTime: 0,
   crunchTimer: null,
+  resizeRafId: null,
   sequenceTimers: [],
   cardElements: [],
   preloadedImages: [],
@@ -136,6 +137,10 @@ const stage2 = {
       clearTimeout(this.crunchTimer);
       this.crunchTimer = null;
     }
+    if (this.resizeRafId) {
+      cancelAnimationFrame(this.resizeRafId);
+      this.resizeRafId = null;
+    }
     this.sequenceTimers.forEach((timerId) => clearTimeout(timerId));
     this.sequenceTimers = [];
   },
@@ -165,9 +170,15 @@ const stage2 = {
     this.eggTrigger.addEventListener('click', onClick);
 
     window.addEventListener('resize', () => {
-      if (this.isAlignedPhase && this.cardElements.length > 0) {
-        this.alignCardsInFormation();
+      if (!this.isAlignedPhase || this.cardElements.length === 0 || this.resizeRafId) {
+        return;
       }
+      this.resizeRafId = requestAnimationFrame(() => {
+        this.resizeRafId = null;
+        if (this.isAlignedPhase && this.cardElements.length > 0) {
+          this.alignCardsInFormation();
+        }
+      });
     }, { passive: true });
   },
 
@@ -604,6 +615,13 @@ const stage2 = {
       if (this.counterFocal) {
         this.counterFocal.classList.add('is-handed-off');
       }
+      if (this.cardsLayer) {
+        this.cardsLayer.innerHTML = '';
+      }
+      if (this.shardsContainer) {
+        this.shardsContainer.innerHTML = '';
+      }
+      this.cardElements = [];
     }, 520);
     this.sequenceTimers.push(doneTimer);
   },

@@ -117,7 +117,6 @@
   opacity: 0.92;
 }
 
-.stage2-egg-wrapper[data-crack="1"] ~ .stage2-ambient-glow,
 .stage2-egg-scene[data-crack="1"] .stage2-ambient-glow {
   transform: scale(1.06);
   background: radial-gradient(circle, rgba(233, 238, 255, 0.22) 0%, rgba(201, 209, 224, 0.08) 50%, rgba(11, 12, 16, 0) 74%);
