@@ -14,11 +14,15 @@ const stage3 = {
   descentEmbersContainer: null,
   parallaxLayers: [],
   batsList: [],
+  batsVisible: false,
   isInitialized: false,
   isActive: false,
   isCandleExtinguished: false,
   prefersReducedMotion: false,
   lastTouchTime: 0,
+  viewportWidth: 1440,
+  viewportHeight: 900,
+  heroHeight: 800,
   targetMouseX: 0,
   targetMouseY: 0,
   currentMouseX: 0,
@@ -28,15 +32,16 @@ const stage3 = {
   lastScrollY: 0,
   ambientPhase: 0,
   ambientRamp: 0,
-  batFlightClock: 0,
-  batBurstEnergy: 0,
   parallaxRafId: null,
   petalsRafId: null,
   petalsList: [],
   embersList: [],
+  petalSprites: [],
+  emberSprites: {},
+  asciiFlowers: [],
+  asciiCharRamp: " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
   revealObserver: null,
   timers: [],
-  audioCtx: null,
 
   init() {
     this.stageElement = document.getElementById('stage-3');
@@ -65,12 +70,17 @@ const stage3 = {
     this.applyTranslations();
 
     if (!this.isInitialized) {
+      this.updateViewportMetrics();
       this.bindEvents();
       this.spawnDescentEmbers();
       this.initBatsFlock();
       this.setupRevealObserver();
       this.resizeCanvas();
+      this.initGalleryAsciiFlowers();
       this.isInitialized = true;
+    } else {
+      this.updateViewportMetrics();
+      this.resizeGalleryAsciiFlowers();
     }
 
     window.scrollTo(0, 0);
@@ -80,6 +90,12 @@ const stage3 = {
 
     this.handleStage2CounterTransition();
     this.startParallaxLoop();
+  },
+
+  updateViewportMetrics() {
+    this.viewportWidth = window.innerWidth || 1440;
+    this.viewportHeight = window.innerHeight || 900;
+    this.heroHeight = (this.heroElement && this.heroElement.offsetHeight) || this.viewportHeight || 800;
   },
 
   collectParallaxLayers() {
@@ -193,15 +209,7 @@ const stage3 = {
   },
 
   getScrollTop() {
-    let rectScroll = 0;
-    if (this.heroElement) {
-      const rect = this.heroElement.getBoundingClientRect();
-      rectScroll = Math.max(0, -rect.top);
-    }
-    const winScroll = window.scrollY || window.pageYOffset || 0;
-    const docScroll = (document.documentElement && document.documentElement.scrollTop) || 0;
-    const bodyScroll = (document.body && document.body.scrollTop) || 0;
-    return Math.max(rectScroll, winScroll, docScroll, bodyScroll);
+    return window.scrollY || window.pageYOffset || (document.documentElement && document.documentElement.scrollTop) || (document.body && document.body.scrollTop) || 0;
   },
 
   bindEvents() {
@@ -209,8 +217,8 @@ const stage3 = {
       if (!this.isActive || this.prefersReducedMotion) {
         return;
       }
-      const vw = window.innerWidth || 1;
-      const vh = window.innerHeight || 1;
+      const vw = this.viewportWidth || 1;
+      const vh = this.viewportHeight || 1;
       this.targetMouseX = ((event.clientX / vw) - 0.5) * 2;
       this.targetMouseY = ((event.clientY / vh) - 0.5) * 2;
     }, { passive: true });
@@ -220,8 +228,8 @@ const stage3 = {
         return;
       }
       const touch = event.touches[0];
-      const vw = window.innerWidth || 1;
-      const vh = window.innerHeight || 1;
+      const vw = this.viewportWidth || 1;
+      const vh = this.viewportHeight || 1;
       this.targetMouseX = ((touch.clientX / vw) - 0.5) * 2;
       this.targetMouseY = ((touch.clientY / vh) - 0.5) * 2;
     }, { passive: true });
@@ -242,23 +250,50 @@ const stage3 = {
           this.stageElement.classList.add('is-hero-revealed');
         }
       }
+
+      if (!this.parallaxRafId && this.targetScrollY <= this.heroHeight * 1.45) {
+        this.startParallaxLoop();
+      }
     };
 
     window.addEventListener('scroll', onScrollUpdate, { capture: true, passive: true });
 
     window.addEventListener('resize', () => {
+      this.updateViewportMetrics();
       this.resizeCanvas();
+      this.resizeGalleryAsciiFlowers();
+      if (!this.parallaxRafId && this.isActive && this.targetScrollY <= this.heroHeight * 1.45) {
+        this.startParallaxLoop();
+      }
     }, { passive: true });
 
     const galleryCards = this.stageElement.querySelectorAll('.gallery-card');
     galleryCards.forEach((card) => {
+      card.addEventListener('mouseenter', () => {
+        this.setCardFlowerSpinning(card, true);
+      });
+      card.addEventListener('mouseleave', () => {
+        if (!card.classList.contains('is-active-card')) {
+          this.setCardFlowerSpinning(card, false);
+        }
+      });
+      card.addEventListener('focusin', () => {
+        this.setCardFlowerSpinning(card, true);
+      });
+      card.addEventListener('focusout', () => {
+        if (!card.classList.contains('is-active-card')) {
+          this.setCardFlowerSpinning(card, false);
+        }
+      });
       card.addEventListener('touchstart', () => {
         galleryCards.forEach((other) => {
           if (other !== card) {
             other.classList.remove('is-active-card');
+            this.setCardFlowerSpinning(other, false);
           }
         });
-        card.classList.toggle('is-active-card');
+        const isNowActive = card.classList.toggle('is-active-card');
+        this.setCardFlowerSpinning(card, isNowActive);
       }, { passive: true });
     });
 
@@ -307,16 +342,32 @@ const stage3 = {
   startParallaxLoop() {
     if (this.parallaxRafId) {
       cancelAnimationFrame(this.parallaxRafId);
+      this.parallaxRafId = null;
     }
 
     const tick = () => {
       if (!this.isActive) {
+        this.parallaxRafId = null;
         return;
       }
 
-      this.targetScrollY = this.getScrollTop();
-      const heroHeight = (this.heroElement && this.heroElement.offsetHeight) || window.innerHeight || 800;
+      const heroHeight = this.heroHeight || 800;
       const lerpFactor = this.prefersReducedMotion ? 1 : 0.065;
+
+      const scrollDiff = this.targetScrollY - this.currentScrollY;
+      if (Math.abs(scrollDiff) < 0.35) {
+        this.currentScrollY = this.targetScrollY;
+      } else {
+        this.currentScrollY += scrollDiff * 0.24;
+      }
+
+      const scrollRatio = Math.max(0, Math.min(1.5, this.currentScrollY / heroHeight));
+
+      if (scrollRatio > 1.38 && Math.abs(scrollDiff) < 0.35) {
+        this.updateBatsFlock(scrollRatio);
+        this.parallaxRafId = null;
+        return;
+      }
 
       if (!this.prefersReducedMotion) {
         this.ambientPhase += 0.007;
@@ -332,15 +383,6 @@ const stage3 = {
       this.currentMouseX += (desiredX - this.currentMouseX) * lerpFactor;
       this.currentMouseY += (desiredY - this.currentMouseY) * lerpFactor;
 
-      const scrollDiff = this.targetScrollY - this.currentScrollY;
-      if (Math.abs(scrollDiff) < 0.35) {
-        this.currentScrollY = this.targetScrollY;
-      } else {
-        this.currentScrollY += scrollDiff * 0.24;
-      }
-
-      const scrollRatio = Math.max(0, Math.min(1.5, this.currentScrollY / heroHeight));
-
       if (this.stageElement) {
         const darkness = Math.min(1, scrollRatio * 1.05);
         const strataRise = Math.min(125, scrollRatio * 108);
@@ -350,8 +392,8 @@ const stage3 = {
       }
 
       if (scrollRatio <= 1.35) {
-        const maxShiftX = Math.min(window.innerWidth * 0.055, 64);
-        const maxShiftY = Math.min(window.innerHeight * 0.042, 42);
+        const maxShiftX = Math.min(this.viewportWidth * 0.055, 64);
+        const maxShiftY = Math.min(this.viewportHeight * 0.042, 42);
 
         for (let i = 0; i < this.parallaxLayers.length; i++) {
           const layer = this.parallaxLayers[i];
@@ -378,6 +420,8 @@ const stage3 = {
     }
 
     this.batsLayer.innerHTML = '';
+    this.batsLayer.style.opacity = '0';
+    this.batsVisible = false;
     this.batsList = [];
     const count = 32;
     const fragment = document.createDocumentFragment();
@@ -388,19 +432,14 @@ const stage3 = {
 
       batEl.innerHTML = `
         <svg class="bat-svg" viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg">
-          <g class="bat-wing-left">
-            <path d="M50,26 C38,8 16,2 1,14 C12,20 18,28 15,40 C26,32 35,34 41,43 C44,35 47,31 50,32 Z" fill="#14161c" stroke="#c9d1e0" stroke-width="1.65" />
-          </g>
-          <g class="bat-wing-right">
-            <path d="M50,26 C62,8 84,2 99,14 C88,20 82,28 85,40 C74,32 65,34 59,43 C56,35 53,31 50,32 Z" fill="#14161c" stroke="#c9d1e0" stroke-width="1.65" />
-          </g>
-          <ellipse cx="50" cy="29" rx="6" ry="10" fill="#0b0c10" stroke="rgba(201, 209, 224, 0.45)" stroke-width="0.9" />
-          <polygon points="45.5,21 43,10 49,19" fill="#0b0c10" />
-          <polygon points="54.5,21 57,10 51,19" fill="#0b0c10" />
-          <circle cx="47.8" cy="22" r="1.4" fill="#f4f1e8" />
-          <circle cx="52.2" cy="22" r="1.4" fill="#f4f1e8" />
+          <g class="bat-wing-left"><use href="#bat-wing-l-def" /></g>
+          <g class="bat-wing-right"><use href="#bat-wing-r-def" /></g>
+          <use href="#bat-body-def" />
         </svg>
       `;
+
+      const leftWing = batEl.querySelector('.bat-wing-left');
+      const rightWing = batEl.querySelector('.bat-wing-right');
 
       fragment.appendChild(batEl);
 
@@ -417,6 +456,9 @@ const stage3 = {
 
       this.batsList.push({
         el: batEl,
+        leftWing,
+        rightWing,
+        isVisible: false,
         startX,
         startY,
         ctrlX,
@@ -446,25 +488,35 @@ const stage3 = {
     const zoneEnd = 1.08;
 
     if (scrollRatio <= zoneStart || scrollRatio >= zoneEnd) {
-      for (let i = 0; i < this.batsList.length; i++) {
-        this.batsList[i].el.style.opacity = '0';
+      if (this.batsVisible && this.batsLayer) {
+        this.batsLayer.style.opacity = '0';
+        this.batsVisible = false;
       }
       return;
     }
 
+    if (!this.batsVisible && this.batsLayer) {
+      this.batsLayer.style.opacity = '1';
+      this.batsVisible = true;
+    }
+
     const zoneProgress = (scrollRatio - zoneStart) / (zoneEnd - zoneStart);
-    const vw = window.innerWidth || 1440;
-    const vh = window.innerHeight || 900;
+    const vw = this.viewportWidth;
+    const vh = this.viewportHeight;
 
     for (let i = 0; i < this.batsList.length; i++) {
       const bat = this.batsList[i];
       const t = (zoneProgress - bat.enterAt) / bat.span;
 
       if (t <= 0 || t >= 1) {
-        bat.el.style.opacity = '0';
+        if (bat.isVisible) {
+          bat.el.style.opacity = '0';
+          bat.isVisible = false;
+        }
         continue;
       }
 
+      bat.isVisible = true;
       const invT = 1 - t;
       const pctX = (invT * invT * bat.startX) + (2 * invT * t * bat.ctrlX) + (t * t * bat.endX);
       const pctY = (invT * invT * bat.startY) + (2 * invT * t * bat.ctrlY) + (t * t * bat.endY);
@@ -488,10 +540,13 @@ const stage3 = {
       }
 
       bat.el.style.opacity = Math.max(0, Math.min(1, edgeAlpha)).toFixed(3);
-      bat.el.style.setProperty('--bat-wing-left-rot', `${wingRot.toFixed(1)}deg`);
-      bat.el.style.setProperty('--bat-wing-right-rot', `${(-wingRot).toFixed(1)}deg`);
-      bat.el.style.setProperty('--bat-wing-sy', wingScaleY.toFixed(3));
       bat.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) rotate(${angleDeg.toFixed(1)}deg) scale(${bat.scale.toFixed(2)})`;
+      if (bat.leftWing) {
+        bat.leftWing.style.transform = `rotate(${wingRot.toFixed(1)}deg) scaleY(${wingScaleY.toFixed(3)})`;
+      }
+      if (bat.rightWing) {
+        bat.rightWing.style.transform = `rotate(${(-wingRot).toFixed(1)}deg) scaleY(${wingScaleY.toFixed(3)})`;
+      }
     }
   },
 
@@ -536,6 +591,7 @@ const stage3 = {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
           entry.target.classList.add('is-revealed');
+          this.revealObserver.unobserve(entry.target);
         }
       });
     }, {
@@ -643,16 +699,68 @@ const stage3 = {
     }
   },
 
-  createPetal(startAtTop) {
-    const vw = window.innerWidth || 375;
-    const vh = window.innerHeight || 667;
-    const colors = [
+  buildParticleSprites() {
+    if (this.petalSprites.length > 0) {
+      return;
+    }
+
+    const palettes = [
       { main: '#c9d1e0', edge: '#f4f1e8' },
       { main: '#8e93a3', edge: '#c9d1e0' },
       { main: '#f4f1e8', edge: '#ffffff' },
       { main: '#2a2d38', edge: '#8e93a3' }
     ];
-    const palette = colors[Math.floor(Math.random() * colors.length)];
+
+    const baseRadius = 16;
+    const dim = baseRadius * 2 + 4;
+    const center = dim / 2;
+
+    this.petalSprites = palettes.map((palette) => {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = dim;
+      offscreen.height = dim;
+      const octx = offscreen.getContext('2d');
+      octx.translate(center, center);
+      const grad = octx.createRadialGradient(0, -baseRadius * 0.2, baseRadius * 0.1, 0, 0, baseRadius);
+      grad.addColorStop(0, palette.edge);
+      grad.addColorStop(1, palette.main);
+      octx.fillStyle = grad;
+      octx.beginPath();
+      octx.moveTo(0, -baseRadius);
+      octx.bezierCurveTo(baseRadius * 0.95, -baseRadius * 0.75, baseRadius * 0.85, baseRadius * 0.65, 0, baseRadius);
+      octx.bezierCurveTo(-baseRadius * 0.85, baseRadius * 0.65, -baseRadius * 0.95, -baseRadius * 0.75, 0, -baseRadius);
+      octx.closePath();
+      octx.fill();
+      return { canvas: offscreen, baseRadius, halfDim: center };
+    });
+
+    const emberColors = ['#f4f1e8', '#c9d1e0'];
+    const emberDim = 28;
+    const emberCenter = emberDim / 2;
+    const emberBaseRadius = 4;
+
+    emberColors.forEach((color) => {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = emberDim;
+      offscreen.height = emberDim;
+      const octx = offscreen.getContext('2d');
+      const glowGrad = octx.createRadialGradient(emberCenter, emberCenter, 0.5, emberCenter, emberCenter, emberCenter);
+      glowGrad.addColorStop(0, color);
+      glowGrad.addColorStop(0.3, color);
+      glowGrad.addColorStop(0.6, 'rgba(233, 238, 255, 0.28)');
+      glowGrad.addColorStop(1, 'rgba(233, 238, 255, 0)');
+      octx.fillStyle = glowGrad;
+      octx.beginPath();
+      octx.arc(emberCenter, emberCenter, emberCenter, 0, Math.PI * 2);
+      octx.fill();
+      this.emberSprites[color] = { canvas: offscreen, baseRadius: emberBaseRadius, halfDim: emberCenter };
+    });
+  },
+
+  createPetal(startAtTop) {
+    const vw = this.viewportWidth || 375;
+    const vh = this.viewportHeight || 667;
+    const spriteIndex = Math.floor(Math.random() * 4);
 
     return {
       x: Math.random() * vw,
@@ -668,14 +776,13 @@ const stage3 = {
       flipPhase: Math.random() * Math.PI * 2,
       flipSpeed: 0.02 + Math.random() * 0.025,
       opacity: 0.65 + Math.random() * 0.3,
-      mainColor: palette.main,
-      edgeColor: palette.edge
+      spriteIndex
     };
   },
 
   createEmber(startAtTop) {
-    const vw = window.innerWidth || 375;
-    const vh = window.innerHeight || 667;
+    const vw = this.viewportWidth || 375;
+    const vh = this.viewportHeight || 667;
 
     return {
       x: Math.random() * vw,
@@ -695,7 +802,9 @@ const stage3 = {
       return;
     }
 
-    const isMobile = window.innerWidth < 640;
+    this.buildParticleSprites();
+
+    const isMobile = this.viewportWidth < 640;
     const petalCount = isMobile ? 28 : 46;
     const emberCount = isMobile ? 16 : 26;
 
@@ -719,8 +828,8 @@ const stage3 = {
         return;
       }
 
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
+      const vw = this.viewportWidth;
+      const vh = this.viewportHeight;
       const ctx = this.petalsCtx;
 
       ctx.clearRect(0, 0, vw, vh);
@@ -738,15 +847,19 @@ const stage3 = {
         }
 
         const alpha = 0.35 + (Math.sin(ember.pulsePhase) + 1) * 0.28;
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = ember.color;
-        ctx.shadowColor = 'rgba(233, 238, 255, 0.35)';
-        ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.arc(ember.x, ember.y, ember.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+        const sprite = this.emberSprites[ember.color];
+        if (sprite) {
+          const scale = ember.radius / sprite.baseRadius;
+          const drawRadius = sprite.halfDim * scale;
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(
+            sprite.canvas,
+            ember.x - drawRadius,
+            ember.y - drawRadius,
+            drawRadius * 2,
+            drawRadius * 2
+          );
+        }
       }
 
       for (let i = 0; i < this.petalsList.length; i++) {
@@ -768,28 +881,20 @@ const stage3 = {
         }
 
         const flipScale = 0.35 + Math.abs(Math.cos(petal.flipPhase)) * 0.65;
-
-        ctx.save();
-        ctx.translate(petal.x, petal.y);
-        ctx.rotate(petal.rotation);
-        ctx.scale(1, flipScale);
-        ctx.globalAlpha = petal.opacity;
-
-        const s = petal.size;
-        const grad = ctx.createRadialGradient(0, -s * 0.2, s * 0.1, 0, 0, s);
-        grad.addColorStop(0, petal.edgeColor);
-        grad.addColorStop(1, petal.mainColor);
-
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.moveTo(0, -s);
-        ctx.bezierCurveTo(s * 0.95, -s * 0.75, s * 0.85, s * 0.65, 0, s);
-        ctx.bezierCurveTo(-s * 0.85, s * 0.65, -s * 0.95, -s * 0.75, 0, -s);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+        const sprite = this.petalSprites[petal.spriteIndex];
+        if (sprite) {
+          const sizeRatio = petal.size / sprite.baseRadius;
+          ctx.save();
+          ctx.translate(petal.x, petal.y);
+          ctx.rotate(petal.rotation);
+          ctx.scale(sizeRatio, sizeRatio * flipScale);
+          ctx.globalAlpha = petal.opacity;
+          ctx.drawImage(sprite.canvas, -sprite.halfDim, -sprite.halfDim);
+          ctx.restore();
+        }
       }
 
+      ctx.globalAlpha = 1;
       this.petalsRafId = requestAnimationFrame(renderParticles);
     };
 
@@ -805,50 +910,46 @@ const stage3 = {
     }
 
     try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) {
+      const ctx = (typeof app !== 'undefined' && typeof app.getAudioContext === 'function')
+        ? app.getAudioContext()
+        : null;
+      if (!ctx) {
         return;
       }
-      if (!this.audioCtx) {
-        this.audioCtx = new AudioContextClass();
-      }
-      if (this.audioCtx.state === 'suspended') {
-        this.audioCtx.resume();
-      }
 
-      const now = this.audioCtx.currentTime;
+      const now = ctx.currentTime;
 
-      const bufferSize = this.audioCtx.sampleRate * 0.45;
-      const noiseBuffer = this.audioCtx.createBuffer(1, bufferSize, this.audioCtx.sampleRate);
+      const bufferSize = ctx.sampleRate * 0.45;
+      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const output = noiseBuffer.getChannelData(0);
       for (let i = 0; i < bufferSize; i++) {
         output[i] = Math.random() * 2 - 1;
       }
 
-      const whiteNoise = this.audioCtx.createBufferSource();
+      const whiteNoise = ctx.createBufferSource();
       whiteNoise.buffer = noiseBuffer;
 
-      const filter = this.audioCtx.createBiquadFilter();
+      const filter = ctx.createBiquadFilter();
       filter.type = 'bandpass';
       filter.frequency.setValueAtTime(620, now);
       filter.frequency.exponentialRampToValueAtTime(220, now + 0.42);
       filter.Q.setValueAtTime(1.8, now);
 
-      const noiseGain = this.audioCtx.createGain();
+      const noiseGain = ctx.createGain();
       noiseGain.gain.setValueAtTime(0.01, now);
       noiseGain.gain.linearRampToValueAtTime(0.14, now + 0.08);
       noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
 
       whiteNoise.connect(filter);
       filter.connect(noiseGain);
-      noiseGain.connect(this.audioCtx.destination);
+      noiseGain.connect(ctx.destination);
       whiteNoise.start(now);
       whiteNoise.stop(now + 0.45);
 
       const chimeNotes = [440, 554.37, 659.25];
       chimeNotes.forEach((freq, idx) => {
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
         const start = now + 0.25 + idx * 0.14;
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, start);
@@ -856,11 +957,822 @@ const stage3 = {
         gain.gain.linearRampToValueAtTime(0.06, start + 0.06);
         gain.gain.exponentialRampToValueAtTime(0.0008, start + 1.25);
         osc.connect(gain);
-        gain.connect(this.audioCtx.destination);
+        gain.connect(ctx.destination);
         osc.start(start);
         osc.stop(start + 1.3);
       });
     } catch (e) {
+    }
+  },
+
+  initGalleryAsciiFlowers() {
+    if (!this.stageElement) {
+      return;
+    }
+
+    const cards = this.stageElement.querySelectorAll('.gallery-card[data-flower]');
+    this.asciiFlowers = [];
+
+    cards.forEach((card, index) => {
+      const type = card.getAttribute('data-flower') || 'rose';
+      const canvas = card.querySelector('.gallery-ascii-canvas');
+      if (!canvas) {
+        return;
+      }
+
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const points = this.generateFlowerPoints(type);
+
+      const initialPoses = {
+        moonflower: { yaw: 0.45, pitch: -0.46, roll: 0.10, fovFactor: 1.05, centerY: -0.62 },
+        lily: { yaw: 0.25, pitch: -0.44, roll: -0.09, fovFactor: 0.96, centerY: -0.60 },
+        rose: { yaw: 0.38, pitch: -0.52, roll: 0.11, fovFactor: 1.02, centerY: -0.68 },
+        chamomile: { yaw: 0.52, pitch: -0.58, roll: 0.08, fovFactor: 1.02, centerY: -0.62 },
+        lotus: { yaw: 0.30, pitch: -0.50, roll: 0.06, fovFactor: 0.98, centerY: -0.58 }
+      };
+
+      const pose = initialPoses[type] || initialPoses.rose;
+
+      const instance = {
+        card,
+        canvas,
+        ctx,
+        type,
+        points,
+        width: 0,
+        height: 0,
+        dpr: 1,
+        cols: 0,
+        rows: 0,
+        cellW: 5.2,
+        cellH: 8.8,
+        zBuffer: null,
+        lumBuffer: null,
+        partBuffer: null,
+        charBuffer: null,
+        yaw: pose.yaw + index * 0.15,
+        pitch: pose.pitch,
+        baseRoll: pose.roll,
+        roll: pose.roll,
+        fovFactor: pose.fovFactor,
+        centerY: pose.centerY,
+        spinPhase: 0,
+        isSpinning: false,
+        currentSpeed: 0,
+        targetSpeed: 0,
+        rafId: null
+      };
+
+      this.asciiFlowers.push(instance);
+      this.setupFlowerCanvasMetrics(instance);
+      this.renderFlowerFrame(instance);
+    });
+  },
+
+  resizeGalleryAsciiFlowers() {
+    if (!this.asciiFlowers || this.asciiFlowers.length === 0) {
+      return;
+    }
+
+    for (let i = 0; i < this.asciiFlowers.length; i++) {
+      const inst = this.asciiFlowers[i];
+      this.setupFlowerCanvasMetrics(inst);
+      this.renderFlowerFrame(inst);
+    }
+  },
+
+  setupFlowerCanvasMetrics(inst) {
+    const rect = inst.canvas.getBoundingClientRect();
+    const w = Math.max(220, Math.floor(rect.width || 320));
+    const h = Math.max(260, Math.floor(rect.height || 390));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    inst.dpr = dpr;
+    inst.width = w;
+    inst.height = h;
+    inst.canvas.width = Math.floor(w * dpr);
+    inst.canvas.height = Math.floor(h * dpr);
+    inst.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    inst.cellW = w < 290 ? 4.6 : 5.1;
+    inst.cellH = w < 290 ? 7.8 : 8.6;
+    inst.cols = Math.max(36, Math.floor(w / inst.cellW));
+    inst.rows = Math.max(36, Math.floor(h / inst.cellH));
+
+    const total = inst.cols * inst.rows;
+    inst.zBuffer = new Float32Array(total);
+    inst.lumBuffer = new Float32Array(total);
+    inst.partBuffer = new Uint8Array(total);
+    inst.charBuffer = new Uint16Array(total);
+
+    const fontPx = Math.round(inst.cellH * 0.98);
+    inst.ctx.font = `600 ${fontPx}px ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", "Courier New", monospace`;
+    inst.ctx.textAlign = 'center';
+    inst.ctx.textBaseline = 'middle';
+  },
+
+  setCardFlowerSpinning(card, shouldSpin) {
+    if (!this.asciiFlowers) {
+      return;
+    }
+
+    const inst = this.asciiFlowers.find((item) => item.card === card);
+    if (!inst) {
+      return;
+    }
+
+    inst.isSpinning = shouldSpin;
+    inst.targetSpeed = shouldSpin ? 0.022 : 0;
+
+    if (!inst.rafId) {
+      this.startFlowerSpinLoop(inst);
+    }
+  },
+
+  startFlowerSpinLoop(inst) {
+    const step = () => {
+      if (!this.isActive) {
+        inst.rafId = null;
+        return;
+      }
+
+      const accel = inst.isSpinning ? 0.08 : 0.055;
+      inst.currentSpeed += (inst.targetSpeed - inst.currentSpeed) * accel;
+
+      if (!inst.isSpinning && Math.abs(inst.currentSpeed) < 0.00035) {
+        inst.currentSpeed = 0;
+        this.renderFlowerFrame(inst);
+        inst.rafId = null;
+        return;
+      }
+
+      inst.yaw += inst.currentSpeed;
+      inst.spinPhase += inst.currentSpeed * 1.4;
+      inst.roll = inst.baseRoll + Math.sin(inst.spinPhase) * 0.06;
+
+      this.renderFlowerFrame(inst);
+      inst.rafId = requestAnimationFrame(step);
+    };
+
+    inst.rafId = requestAnimationFrame(step);
+  },
+
+  sampleParametricSurface(points, uSteps, vSteps, part, aoBase, evalFn) {
+    const eps = 0.004;
+    for (let iu = 0; iu <= uSteps; iu++) {
+      const u = iu / uSteps;
+      for (let iv = 0; iv <= vSteps; iv++) {
+        const v = iv / vSteps;
+        const p = evalFn(u, v);
+        const pu = evalFn(Math.min(1, u + eps), v);
+        const pv = evalFn(u, Math.min(1, v + eps));
+
+        const tx = pu.x - p.x;
+        const ty = pu.y - p.y;
+        const tz = pu.z - p.z;
+
+        const bx = pv.x - p.x;
+        const by = pv.y - p.y;
+        const bz = pv.z - p.z;
+
+        let nx = ty * bz - tz * by;
+        let ny = tz * bx - tx * bz;
+        let nz = tx * by - ty * bx;
+
+        const outDot = nx * p.x + nz * p.z + ny * (p.y + 0.25);
+        if (outDot < 0) {
+          nx = -nx;
+          ny = -ny;
+          nz = -nz;
+        }
+
+        const len = Math.hypot(nx, ny, nz) || 1;
+        const ao = Math.max(0.18, Math.min(1.0, aoBase * (0.42 + 0.58 * u)));
+
+        points.push({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          nx: nx / len,
+          ny: ny / len,
+          nz: nz / len,
+          part,
+          ao
+        });
+      }
+    }
+  },
+
+  addCommonStemAndLeaves(points, stemTopY, stemLen, leafConfigs) {
+    this.sampleParametricSurface(points, 48, 12, 1, 0.82, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const y = stemTopY - u * stemLen;
+      const curveX = Math.sin(u * Math.PI * 1.1) * 0.15;
+      const curveZ = Math.cos(u * Math.PI * 0.9) * 0.08 - 0.08;
+      const r = 0.082 * (1 - u * 0.2);
+      return {
+        x: curveX + r * Math.cos(theta),
+        y,
+        z: curveZ + r * Math.sin(theta)
+      };
+    });
+
+    leafConfigs.forEach((lf) => {
+      const baseY = stemTopY - lf.stemU * stemLen;
+      const baseX = Math.sin(lf.stemU * Math.PI * 1.1) * 0.15;
+      const baseZ = Math.cos(lf.stemU * Math.PI * 0.9) * 0.08 - 0.08;
+      const dirX = Math.cos(lf.angle);
+      const dirZ = Math.sin(lf.angle);
+      const perpX = -dirZ;
+      const perpZ = dirX;
+
+      this.sampleParametricSurface(points, 20, 14, 2, 0.86, (u, v) => {
+        const s = (v - 0.5) * 2;
+        const profile = Math.sin(Math.pow(u, 0.78) * Math.PI);
+        const w = s * lf.width * profile;
+        const forward = 0.07 + u * lf.len;
+        const vFold = Math.abs(s) * 0.10 * profile;
+        const archY = Math.sin(u * Math.PI * 0.82) * 0.26 - Math.pow(u, 1.8) * lf.droop + vFold;
+
+        return {
+          x: baseX + dirX * forward + perpX * w,
+          y: baseY + archY,
+          z: baseZ + dirZ * forward + perpZ * w
+        };
+      });
+    });
+  },
+
+  generateFlowerPoints(type) {
+    const points = [];
+
+    if (type === 'rose') {
+      const layers = [
+        { count: 3, radius: 0.26, height: 0.72, tilt: 0.22, curl: 0.18, wave: 0.06, yBase: 0.14, rot: 0.0, ao: 0.68 },
+        { count: 4, radius: 0.45, height: 0.80, tilt: 0.42, curl: 0.30, wave: 0.10, yBase: 0.10, rot: 0.55, ao: 0.78 },
+        { count: 5, radius: 0.68, height: 0.84, tilt: 0.68, curl: 0.46, wave: 0.14, yBase: 0.05, rot: 1.15, ao: 0.88 },
+        { count: 6, radius: 0.94, height: 0.82, tilt: 0.96, curl: 0.62, wave: 0.18, yBase: -0.02, rot: 1.85, ao: 0.95 },
+        { count: 6, radius: 1.22, height: 0.76, tilt: 1.26, curl: 0.78, wave: 0.22, yBase: -0.10, rot: 2.45, ao: 1.0 },
+        { count: 7, radius: 1.48, height: 0.66, tilt: 1.54, curl: 0.92, wave: 0.25, yBase: -0.20, rot: 3.10, ao: 0.96 }
+      ];
+
+      layers.forEach((layer, layerIdx) => {
+        const spanAngle = (Math.PI * 2 / layer.count) * 0.74;
+        for (let k = 0; k < layer.count; k++) {
+          const baseAngle = layer.rot + (k * Math.PI * 2) / layer.count;
+          const petalVar = 1 + ((k % 2 === 0 ? 1 : -1) * 0.04);
+
+          this.sampleParametricSurface(points, 20, 18, 0, layer.ao, (u, v) => {
+            const s = (v - 0.5) * 2;
+            const widthEnv = Math.sin(Math.pow(u, 0.72) * Math.PI * 0.92) * (1 - 0.12 * s * s);
+            const cupDepth = (1 - s * s) * 0.26 * Math.sin(u * Math.PI);
+            const bloomCurve = Math.pow(u, 1.35) * layer.tilt;
+            const lipCurl = Math.max(0, u - 0.58) / 0.42;
+            const curlRadial = Math.pow(lipCurl, 1.7) * layer.curl * (1 - 0.35 * s * s);
+            const curlDrop = Math.pow(lipCurl, 2.1) * layer.curl * 0.58 * (1 + 0.4 * s * s);
+
+            const r = (0.07 + layer.radius * (0.28 * u + 0.72 * bloomCurve) + curlRadial - cupDepth) * petalVar;
+            const y = layer.yBase + layer.height * Math.sin(u * Math.PI * 0.64) - curlDrop - 0.08 * s * s * u;
+            const angleOffset = s * spanAngle * (0.35 + 0.65 * widthEnv);
+            const twist = 0.14 * (1 - u) * (layerIdx % 2 === 0 ? 1 : -1);
+            const ripple = Math.cos(s * Math.PI * 1.5) * layer.wave * Math.pow(u, 1.6) * 0.14;
+            const theta = baseAngle + angleOffset + twist;
+
+            return {
+              x: (r + ripple) * Math.cos(theta),
+              y,
+              z: (r + ripple) * Math.sin(theta)
+            };
+          });
+        }
+      });
+
+      for (let k = 0; k < 5; k++) {
+        const sepalAngle = (k * Math.PI * 2) / 5 + 0.35;
+        this.sampleParametricSurface(points, 14, 8, 1, 0.75, (u, v) => {
+          const s = (v - 0.5) * 2;
+          const leafWidth = (1 - Math.pow(u, 0.85)) * 0.28;
+          const r = 0.22 + u * 1.1;
+          const y = -0.26 + Math.sin(u * Math.PI) * 0.12 - Math.pow(u, 1.6) * 0.5;
+          const theta = sepalAngle + s * leafWidth / Math.max(0.25, r * 0.65);
+          return { x: r * Math.cos(theta), y, z: r * Math.sin(theta) };
+        });
+      }
+
+      this.addCommonStemAndLeaves(points, -0.45, 2.35, [
+        { stemU: 0.32, angle: 0.25, len: 1.18, width: 0.44, droop: 0.35 },
+        { stemU: 0.58, angle: 3.45, len: 1.02, width: 0.38, droop: 0.30 }
+      ]);
+      return points;
+    }
+
+    if (type === 'lily') {
+      const whorls = [
+        { count: 3, rotOffset: 0, width: 0.52, archHeight: 0.92, recurve: 0.72, radiusScale: 1.55, ao: 0.98 },
+        { count: 3, rotOffset: Math.PI / 3, width: 0.42, archHeight: 0.84, recurve: 0.82, radiusScale: 1.48, ao: 0.90 }
+      ];
+
+      whorls.forEach((wh) => {
+        for (let k = 0; k < wh.count; k++) {
+          const baseAngle = wh.rotOffset + (k * Math.PI * 2) / wh.count;
+          const dirX = Math.cos(baseAngle);
+          const dirZ = Math.sin(baseAngle);
+          const perpX = -dirZ;
+          const perpZ = dirX;
+
+          this.sampleParametricSurface(points, 28, 18, 0, wh.ao, (u, v) => {
+            const s = (v - 0.5) * 2;
+            const profile = Math.sin(Math.pow(u, 0.72) * Math.PI);
+            const w = s * wh.width * profile;
+            const radialOut = 0.10 + Math.pow(u, 0.88) * wh.radiusScale - Math.pow(Math.max(0, u - 0.68) / 0.32, 2.0) * 0.28;
+            const cupAndRib = Math.abs(s) * 0.14 * profile - Math.cos(s * Math.PI * 2) * 0.03 * u;
+            const y = -0.15 + Math.sin(u * Math.PI * 0.72) * wh.archHeight - Math.pow(Math.max(0, u - 0.52) / 0.48, 2.15) * wh.recurve + cupAndRib;
+
+            return {
+              x: dirX * radialOut + perpX * w,
+              y,
+              z: dirZ * radialOut + perpZ * w
+            };
+          });
+        }
+      });
+
+      for (let k = 0; k < 6; k++) {
+        const stAngle = (k * Math.PI * 2) / 6 + 0.26;
+        const dirX = Math.cos(stAngle);
+        const dirZ = Math.sin(stAngle);
+        const perpX = -dirZ;
+        const perpZ = dirX;
+
+        this.sampleParametricSurface(points, 18, 6, 3, 0.95, (u, v) => {
+          const theta = v * Math.PI * 2;
+          const filR = 0.025;
+          const flare = Math.pow(u, 1.75) * 0.68;
+          const h = -0.10 + u * 1.05;
+          return {
+            x: dirX * (0.06 + flare) + (perpX * Math.cos(theta) + dirX * Math.sin(theta)) * filR,
+            y: h,
+            z: dirZ * (0.06 + flare) + (perpZ * Math.cos(theta) + dirZ * Math.sin(theta)) * filR
+          };
+        });
+
+        const tipR = 0.06 + 0.68;
+        const tipY = -0.10 + 1.05;
+        this.sampleParametricSurface(points, 10, 10, 3, 1.0, (u, v) => {
+          const s = (u - 0.5) * 2;
+          const theta = v * Math.PI * 2;
+          const rad = 0.055 * Math.sqrt(Math.max(0, 1 - s * s));
+          const len = s * 0.18;
+          return {
+            x: dirX * (tipR + Math.cos(theta) * rad) + perpX * len,
+            y: tipY + Math.sin(theta) * rad,
+            z: dirZ * (tipR + Math.cos(theta) * rad) + perpZ * len
+          };
+        });
+      }
+
+      this.addCommonStemAndLeaves(points, -0.25, 2.45, [
+        { stemU: 0.28, angle: 0.5, len: 1.35, width: 0.26, droop: 0.42 },
+        { stemU: 0.54, angle: 3.6, len: 1.25, width: 0.24, droop: 0.38 }
+      ]);
+      return points;
+    }
+
+    if (type === 'chamomile') {
+      this.sampleParametricSurface(points, 22, 36, 3, 0.96, (u, v) => {
+        const theta = v * Math.PI * 2;
+        const r = u * 0.56;
+        const dome = Math.cos(u * Math.PI * 0.52) * 0.34;
+        const florets = Math.sin(u * 38) * Math.cos(v * 44) * 0.022;
+        return {
+          x: r * Math.cos(theta),
+          y: 0.05 + dome + florets,
+          z: r * Math.sin(theta)
+        };
+      });
+
+      const rayCount = 16;
+      for (let k = 0; k < rayCount; k++) {
+        const baseAngle = (k * Math.PI * 2) / rayCount;
+        const dirX = Math.cos(baseAngle);
+        const dirZ = Math.sin(baseAngle);
+        const perpX = -dirZ;
+        const perpZ = dirX;
+        const slightAlt = (k % 2 === 0 ? 0.03 : -0.02);
+
+        this.sampleParametricSurface(points, 20, 10, 0, 0.95, (u, v) => {
+          const s = (v - 0.5) * 2;
+          const profile = Math.sin(Math.pow(u, 0.65) * Math.PI * 0.96);
+          const w = s * 0.165 * profile;
+          const dist = 0.50 + u * 1.12;
+          const groove = -Math.cos(s * Math.PI) * 0.025 * profile;
+          const droop = Math.sin(u * Math.PI * 0.75) * 0.12 - Math.pow(u, 1.9) * 0.30 + slightAlt;
+
+          return {
+            x: dirX * dist + perpX * w,
+            y: 0.04 + droop + groove,
+            z: dirZ * dist + perpZ * w
+          };
+        });
+      }
+
+      this.sampleParametricSurface(points, 12, 24, 1, 0.78, (u, v) => {
+        const theta = v * Math.PI * 2;
+        const r = 0.12 + u * 0.44;
+        const y = -0.18 + u * 0.20;
+        return {
+          x: r * Math.cos(theta),
+          y,
+          z: r * Math.sin(theta)
+        };
+      });
+
+      this.addCommonStemAndLeaves(points, -0.20, 2.45, [
+        { stemU: 0.30, angle: 0.8, len: 1.05, width: 0.28, droop: 0.30 },
+        { stemU: 0.56, angle: 3.9, len: 0.98, width: 0.26, droop: 0.28 }
+      ]);
+      return points;
+    }
+
+    if (type === 'moonflower') {
+      this.sampleParametricSurface(points, 42, 76, 0, 0.96, (u, v) => {
+        const theta = v * Math.PI * 2;
+        const star5 = Math.cos(5 * theta);
+        const pleat5 = Math.cos(5 * theta + Math.PI);
+
+        const throatR = 0.07 + 0.24 * u;
+        const flareR = Math.pow(u, 2.15) * 1.32;
+        const starLut = 1 + 0.095 * star5 * Math.pow(u, 1.8);
+        const r = (throatR + flareR) * starLut;
+
+        const heightCurve = -0.38 + 1.12 * Math.pow(u, 0.72);
+        const rimDrop = Math.pow(Math.max(0, u - 0.74) / 0.26, 2.0) * 0.22 * (1 + 0.3 * star5);
+        const ribs = (0.032 * star5 - 0.018 * pleat5) * Math.pow(u, 1.3);
+
+        const y = heightCurve - rimDrop + ribs;
+        const spiralTwist = (1 - u) * 0.38;
+
+        return {
+          x: r * Math.cos(theta + spiralTwist),
+          y,
+          z: r * Math.sin(theta + spiralTwist)
+        };
+      });
+
+      for (let k = 0; k < 5; k++) {
+        const ridgeAngle = (k * Math.PI * 2) / 5;
+        this.sampleParametricSurface(points, 24, 5, 3, 1.0, (u, v) => {
+          const s = (v - 0.5) * 2;
+          const theta = ridgeAngle + s * 0.045 * (0.4 + 0.6 * u);
+          const throatR = 0.07 + 0.24 * u;
+          const flareR = Math.pow(u, 2.15) * 1.32;
+          const r = (throatR + flareR) * 1.095;
+          const heightCurve = -0.38 + 1.12 * Math.pow(u, 0.72);
+          const rimDrop = Math.pow(Math.max(0, u - 0.74) / 0.26, 2.0) * 0.28;
+          const y = heightCurve - rimDrop + 0.045;
+          const spiralTwist = (1 - u) * 0.38;
+
+          return {
+            x: r * Math.cos(theta + spiralTwist),
+            y,
+            z: r * Math.sin(theta + spiralTwist)
+          };
+        });
+      }
+
+      this.sampleParametricSurface(points, 36, 10, 1, 0.82, (u, v) => {
+        const theta = v * Math.PI * 2;
+        const y = -0.38 - u * 2.35;
+        const vineHelixR = 0.14 * Math.sin(u * Math.PI);
+        const vineAngle = u * Math.PI * 3.2;
+        const r = 0.072 * (1 - u * 0.2);
+
+        return {
+          x: vineHelixR * Math.cos(vineAngle) + r * Math.cos(theta),
+          y,
+          z: vineHelixR * Math.sin(vineAngle) + r * Math.sin(theta)
+        };
+      });
+
+      const heartLeaves = [
+        { stemU: 0.34, angle: 0.4, scale: 0.72 },
+        { stemU: 0.62, angle: 3.55, scale: 0.64 }
+      ];
+
+      heartLeaves.forEach((hl) => {
+        const baseY = -0.38 - hl.stemU * 2.35;
+        const dirX = Math.cos(hl.angle);
+        const dirZ = Math.sin(hl.angle);
+        const perpX = -dirZ;
+        const perpZ = dirX;
+
+        this.sampleParametricSurface(points, 18, 16, 2, 0.88, (u, v) => {
+          const s = (v - 0.5) * 2;
+          const heartWidth = Math.sin(Math.pow(u, 0.65) * Math.PI) * (1 + 0.28 * (1 - u));
+          const notch = (1 - u) * Math.exp(-s * s * 10) * 0.22;
+          const forward = (0.12 + (u - notch) * 1.15) * hl.scale;
+          const side = s * 0.55 * heartWidth * hl.scale;
+          const archY = (Math.sin(u * Math.PI * 0.75) * 0.22 - Math.pow(u, 1.7) * 0.38 + Math.abs(s) * 0.08) * hl.scale;
+
+          return {
+            x: dirX * forward + perpX * side,
+            y: baseY + archY,
+            z: dirZ * forward + perpZ * side
+          };
+        });
+      });
+
+      return points;
+    }
+
+    this.sampleParametricSurface(points, 14, 24, 3, 0.96, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const r = u * 0.36;
+      const y = 0.04 + Math.cos(u * Math.PI * 0.45) * 0.24;
+      return {
+        x: r * Math.cos(theta),
+        y,
+        z: r * Math.sin(theta)
+      };
+    });
+
+    const lotusRings = [
+      { count: 6, rScale: 0.62, hScale: 0.85, tilt: 0.35, width: 0.28, yOffset: 0.02, rot: 0.0, ao: 0.90 },
+      { count: 8, rScale: 0.98, hScale: 0.82, tilt: 0.68, width: 0.36, yOffset: -0.03, rot: 0.39, ao: 0.96 },
+      { count: 10, rScale: 1.32, hScale: 0.70, tilt: 1.05, width: 0.40, yOffset: -0.10, rot: 0.18, ao: 1.0 },
+      { count: 10, rScale: 1.56, hScale: 0.45, tilt: 1.38, width: 0.42, yOffset: -0.18, rot: 0.52, ao: 0.92 }
+    ];
+
+    lotusRings.forEach((ring) => {
+      for (let k = 0; k < ring.count; k++) {
+        const baseAngle = ring.rot + (k * Math.PI * 2) / ring.count;
+        const dirX = Math.cos(baseAngle);
+        const dirZ = Math.sin(baseAngle);
+        const perpX = -dirZ;
+        const perpZ = dirX;
+
+        this.sampleParametricSurface(points, 20, 14, 0, ring.ao, (u, v) => {
+          const s = (v - 0.5) * 2;
+          const boatProfile = Math.sin(Math.pow(u, 0.76) * Math.PI);
+          const w = s * ring.width * boatProfile;
+          const spoonCup = (1 - s * s) * 0.16 * Math.sin(u * Math.PI);
+
+          const outDist = 0.16 + (u * 0.35 + Math.pow(u, 1.25) * 0.65 * ring.tilt) * ring.rScale - spoonCup * 0.4;
+          const upHeight = ring.yOffset + Math.sin(u * Math.PI * 0.68) * ring.hScale - Math.pow(u, 2.0) * 0.22 * ring.tilt + Math.abs(s) * 0.12 * boatProfile;
+
+          return {
+            x: dirX * outDist + perpX * w,
+            y: upHeight,
+            z: dirZ * outDist + perpZ * w
+          };
+        });
+      }
+    });
+
+    this.addCommonStemAndLeaves(points, -0.26, 2.38, [
+      { stemU: 0.36, angle: 0.6, len: 1.15, width: 0.42, droop: 0.34 },
+      { stemU: 0.62, angle: 3.7, len: 1.02, width: 0.36, droop: 0.30 }
+    ]);
+
+    return points;
+  },
+
+  getFlowerCellColor(type, lum, part) {
+    const l = Math.max(0, Math.min(1, lum));
+
+    if (part === 1 || part === 2) {
+      const r = Math.round(28 + 135 * Math.pow(l, 1.08));
+      const g = Math.round(36 + 155 * Math.pow(l, 0.96));
+      const b = Math.round(46 + 165 * Math.pow(l, 1.02));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (type === 'rose') {
+      if (l > 0.82) {
+        const t = (l - 0.82) / 0.18;
+        const r = Math.round(235 + 20 * t);
+        const g = Math.round(115 + 125 * t);
+        const b = Math.round(125 + 115 * t);
+        return `rgb(${r},${g},${b})`;
+      }
+      const r = Math.round(48 + 195 * Math.pow(l, 0.82));
+      const g = Math.round(12 + 95 * Math.pow(l, 1.50));
+      const b = Math.round(22 + 108 * Math.pow(l, 1.32));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (type === 'lily') {
+      if (part === 3) {
+        const r = Math.round(70 + 185 * Math.pow(l, 0.82));
+        const g = Math.round(35 + 155 * Math.pow(l, 1.10));
+        const b = Math.round(20 + 95 * Math.pow(l, 1.45));
+        return `rgb(${r},${g},${b})`;
+      }
+      const r = Math.round(42 + 210 * Math.pow(l, 0.88));
+      const g = Math.round(40 + 206 * Math.pow(l, 0.90));
+      const b = Math.round(48 + 198 * Math.pow(l, 0.86));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (type === 'chamomile') {
+      if (part === 3) {
+        const r = Math.round(68 + 187 * Math.pow(l, 0.80));
+        const g = Math.round(48 + 170 * Math.pow(l, 0.95));
+        const b = Math.round(20 + 110 * Math.pow(l, 1.40));
+        return `rgb(${r},${g},${b})`;
+      }
+      const r = Math.round(44 + 206 * Math.pow(l, 0.86));
+      const g = Math.round(46 + 204 * Math.pow(l, 0.86));
+      const b = Math.round(54 + 198 * Math.pow(l, 0.84));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (type === 'moonflower') {
+      if (part === 3) {
+        const r = Math.round(70 + 185 * Math.pow(l, 0.78));
+        const g = Math.round(80 + 175 * Math.pow(l, 0.78));
+        const b = Math.round(110 + 145 * Math.pow(l, 0.72));
+        return `rgb(${r},${g},${b})`;
+      }
+      const r = Math.round(34 + 198 * Math.pow(l, 0.92));
+      const g = Math.round(42 + 202 * Math.pow(l, 0.88));
+      const b = Math.round(62 + 193 * Math.pow(l, 0.80));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (part === 3) {
+      const r = Math.round(65 + 185 * Math.pow(l, 0.85));
+      const g = Math.round(45 + 165 * Math.pow(l, 1.05));
+      const b = Math.round(35 + 140 * Math.pow(l, 1.20));
+      return `rgb(${r},${g},${b})`;
+    }
+    const r = Math.round(46 + 198 * Math.pow(l, 0.88));
+    const g = Math.round(36 + 178 * Math.pow(l, 1.04));
+    const b = Math.round(58 + 188 * Math.pow(l, 0.90));
+    return `rgb(${r},${g},${b})`;
+  },
+
+  renderFlowerFrame(inst) {
+    if (!inst || !inst.ctx || !inst.zBuffer) {
+      return;
+    }
+
+    const cols = inst.cols;
+    const rows = inst.rows;
+    inst.zBuffer.fill(-1e9);
+
+    const cosY = Math.cos(inst.yaw);
+    const sinY = Math.sin(inst.yaw);
+    const cosX = Math.cos(inst.pitch);
+    const sinX = Math.sin(inst.pitch);
+    const cosZ = Math.cos(inst.roll);
+    const sinZ = Math.sin(inst.roll);
+
+    const keyLx = 0.54;
+    const keyLy = 0.68;
+    const keyLz = -0.49;
+
+    const fillLx = -0.62;
+    const fillLy = -0.25;
+    const fillLz = -0.74;
+
+    const fovScale = Math.min(inst.width, inst.height) * 0.92 * inst.fovFactor;
+    const camDist = 4.65;
+    const centerYOffset = inst.centerY;
+
+    const invCellW = 1 / inst.cellW;
+    const invCellH = 1 / inst.cellH;
+    const ramp = this.asciiCharRamp;
+    const rampMax = ramp.length - 1;
+
+    const pts = inst.points;
+    const nPts = pts.length;
+
+    for (let i = 0; i < nPts; i++) {
+      const p = pts[i];
+      const py0 = p.y - centerYOffset;
+
+      const x1 = p.x * cosY + p.z * sinY;
+      const z1 = -p.x * sinY + p.z * cosY;
+      const y1 = py0;
+
+      const x2 = x1 * cosZ - y1 * sinZ;
+      const y2 = x1 * sinZ + y1 * cosZ;
+      const z2 = z1;
+
+      const y3 = y2 * cosX - z2 * sinX;
+      const z3 = y2 * sinX + z2 * cosX;
+      const x3 = x2;
+
+      const depth = camDist - z3;
+      if (depth <= 0.4) {
+        continue;
+      }
+
+      const proj = fovScale / depth;
+      const screenX = inst.width * 0.5 + x3 * proj;
+      const screenY = inst.height * 0.46 - y3 * proj;
+
+      const col = (screenX * invCellW) | 0;
+      const row = (screenY * invCellH) | 0;
+
+      if (col < 0 || col >= cols || row < 0 || row >= rows) {
+        continue;
+      }
+
+      const idx = row * cols + col;
+      if (z3 <= inst.zBuffer[idx]) {
+        continue;
+      }
+
+      const nx1 = p.nx * cosY + p.nz * sinY;
+      const nz1 = -p.nx * sinY + p.nz * cosY;
+      const ny1 = p.ny;
+
+      const nx2 = nx1 * cosZ - ny1 * sinZ;
+      const ny2 = nx1 * sinZ + ny1 * cosZ;
+      const nz2 = nz1;
+
+      const ny3 = ny2 * cosX - nz2 * sinX;
+      const nz3 = ny2 * sinX + nz2 * cosX;
+      const nx3 = nx2;
+
+      let diffKey = nx3 * keyLx + ny3 * keyLy - nz3 * keyLz;
+      if (diffKey < 0) {
+        diffKey = -diffKey * 0.35;
+      }
+
+      let diffFill = nx3 * fillLx + ny3 * fillLy - nz3 * fillLz;
+      if (diffFill < 0) {
+        diffFill = 0;
+      }
+
+      const rim = Math.pow(1 - Math.min(1, Math.abs(nz3)), 2.2) * 0.52;
+      const hz = (-keyLz + 1);
+      const hLen = Math.hypot(keyLx, keyLy, hz);
+      const specDot = Math.max(0, (nx3 * keyLx + ny3 * keyLy + nz3 * hz) / hLen);
+      const spec = Math.pow(specDot, 18) * 0.46;
+
+      let lum = (0.10 + diffKey * 0.64 + diffFill * 0.20 + rim + spec) * p.ao;
+      lum = Math.max(0.03, Math.min(1.0, lum));
+
+      const charIdx = Math.min(rampMax, Math.max(1, (lum * rampMax) | 0));
+
+      inst.zBuffer[idx] = z3;
+      inst.lumBuffer[idx] = lum;
+      inst.partBuffer[idx] = p.part;
+      inst.charBuffer[idx] = charIdx;
+    }
+
+    const ctx = inst.ctx;
+    ctx.fillStyle = '#0d0f14';
+    ctx.fillRect(0, 0, inst.width, inst.height);
+
+    const aura = ctx.createRadialGradient(
+      inst.width * 0.5, inst.height * 0.42, 6,
+      inst.width * 0.5, inst.height * 0.42, Math.min(inst.width, inst.height) * 0.55
+    );
+    if (inst.type === 'rose') {
+      aura.addColorStop(0, 'rgba(175, 34, 48, 0.14)');
+    } else if (inst.type === 'moonflower') {
+      aura.addColorStop(0, 'rgba(165, 188, 235, 0.14)');
+    } else {
+      aura.addColorStop(0, 'rgba(201, 209, 224, 0.12)');
+    }
+    aura.addColorStop(0.6, 'rgba(18, 20, 28, 0.05)');
+    aura.addColorStop(1, 'rgba(13, 15, 20, 0)');
+    ctx.fillStyle = aura;
+    ctx.fillRect(0, 0, inst.width, inst.height);
+
+    const cellW = inst.cellW;
+    const cellH = inst.cellH;
+    const halfW = cellW * 0.5;
+    const halfH = cellH * 0.5;
+    let lastStyle = '';
+
+    for (let r = 0; r < rows; r++) {
+      const rowOffset = r * cols;
+      const yPos = r * cellH + halfH;
+
+      for (let c = 0; c < cols; c++) {
+        const idx = rowOffset + c;
+        if (inst.zBuffer[idx] <= -1e8) {
+          continue;
+        }
+
+        const lum = inst.lumBuffer[idx];
+        const part = inst.partBuffer[idx];
+        const ch = ramp[inst.charBuffer[idx]];
+        const quantizedLum = ((lum * 22) | 0) / 22;
+        const color = this.getFlowerCellColor(inst.type, quantizedLum, part);
+
+        if (color !== lastStyle) {
+          ctx.fillStyle = color;
+          lastStyle = color;
+        }
+
+        ctx.fillText(ch, c * cellW + halfW, yPos);
+      }
     }
   }
 };
