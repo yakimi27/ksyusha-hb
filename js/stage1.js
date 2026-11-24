@@ -201,6 +201,11 @@ const stage1 = {
       this.headingCycleTimer = null;
     }
 
+    if (this.easterEggTimer) {
+      clearTimeout(this.easterEggTimer);
+      this.easterEggTimer = null;
+    }
+
     this.clearButtonExpansion();
 
     if (typeof i18n !== 'undefined') {
