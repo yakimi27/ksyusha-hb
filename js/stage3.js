@@ -34,6 +34,7 @@ const stage3 = {
   ambientRamp: 0,
   parallaxRafId: null,
   petalsRafId: null,
+  resizeRafId: null,
   petalsList: [],
   embersList: [],
   petalSprites: [],
@@ -203,7 +204,6 @@ const stage3 = {
 
     this.setText('stage3-wish-granted', i18n.t('stage3.candleWishGranted'));
     this.setText('stage3-wish-sub', i18n.t('stage3.candleWishSub'));
-    this.setText('stage3-angel-caption', i18n.t('stage3.angelCaption'));
   },
 
   setText(elementId, value) {
@@ -264,13 +264,19 @@ const stage3 = {
     window.addEventListener('scroll', onScrollUpdate, { capture: true, passive: true });
 
     window.addEventListener('resize', () => {
-      this.updateViewportMetrics();
-      this.resizeCanvas();
-      this.resizeGalleryAsciiFlowers();
-      this.resizeWeepingAngel();
-      if (!this.parallaxRafId && this.isActive && this.targetScrollY <= this.heroHeight * 1.45) {
-        this.startParallaxLoop();
+      if (this.resizeRafId) {
+        return;
       }
+      this.resizeRafId = requestAnimationFrame(() => {
+        this.resizeRafId = null;
+        this.updateViewportMetrics();
+        this.resizeCanvas();
+        this.resizeGalleryAsciiFlowers();
+        this.resizeWeepingAngel();
+        if (!this.parallaxRafId && this.isActive && this.targetScrollY <= this.heroHeight * 1.45) {
+          this.startParallaxLoop();
+        }
+      });
     }, { passive: true });
 
     const galleryCards = this.stageElement.querySelectorAll('.gallery-card');
@@ -369,7 +375,7 @@ const stage3 = {
 
       const scrollRatio = Math.max(0, Math.min(1.5, this.currentScrollY / heroHeight));
 
-      if (scrollRatio > 1.38 && Math.abs(scrollDiff) < 0.35) {
+      if ((scrollRatio > 1.38 || this.prefersReducedMotion) && Math.abs(scrollDiff) < 0.35) {
         this.updateBatsFlock(scrollRatio);
         this.parallaxRafId = null;
         return;
@@ -1016,6 +1022,8 @@ const stage3 = {
         lumBuffer: null,
         partBuffer: null,
         charBuffer: null,
+        colorLut: this.buildFlowerColorLut(type),
+        auraGradient: null,
         yaw: pose.yaw + index * 0.15,
         pitch: pose.pitch,
         baseRoll: pose.roll,
@@ -1075,6 +1083,21 @@ const stage3 = {
     inst.ctx.font = `600 ${fontPx}px ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", "Courier New", monospace`;
     inst.ctx.textAlign = 'center';
     inst.ctx.textBaseline = 'middle';
+
+    const aura = inst.ctx.createRadialGradient(
+      w * 0.5, h * 0.42, 6,
+      w * 0.5, h * 0.42, Math.min(w, h) * 0.55
+    );
+    if (inst.type === 'rose') {
+      aura.addColorStop(0, 'rgba(175, 34, 48, 0.14)');
+    } else if (inst.type === 'moonflower') {
+      aura.addColorStop(0, 'rgba(165, 188, 235, 0.14)');
+    } else {
+      aura.addColorStop(0, 'rgba(201, 209, 224, 0.12)');
+    }
+    aura.addColorStop(0.6, 'rgba(18, 20, 28, 0.05)');
+    aura.addColorStop(1, 'rgba(13, 15, 20, 0)');
+    inst.auraGradient = aura;
   },
 
   setCardFlowerSpinning(card, shouldSpin) {
@@ -1618,6 +1641,16 @@ const stage3 = {
     return `rgb(${r},${g},${b})`;
   },
 
+  buildFlowerColorLut(type) {
+    const lut = new Array(4 * 23);
+    for (let part = 0; part < 4; part++) {
+      for (let q = 0; q <= 22; q++) {
+        lut[part * 23 + q] = this.getFlowerCellColor(type, q / 22, part);
+      }
+    }
+    return lut;
+  },
+
   renderFlowerFrame(inst) {
     if (!inst || !inst.ctx || !inst.zBuffer) {
       return;
@@ -1641,6 +1674,12 @@ const stage3 = {
     const fillLx = -0.62;
     const fillLy = -0.25;
     const fillLz = -0.74;
+
+    const hz = -keyLz + 1;
+    const invHLen = 1 / Math.hypot(keyLx, keyLy, hz);
+    const halfLx = keyLx * invHLen;
+    const halfLy = keyLy * invHLen;
+    const halfLz = hz * invHLen;
 
     const fovScale = Math.min(inst.width, inst.height) * 0.92 * inst.fovFactor;
     const camDist = 4.65;
@@ -1713,14 +1752,21 @@ const stage3 = {
         diffFill = 0;
       }
 
-      const rim = Math.pow(1 - Math.min(1, Math.abs(nz3)), 2.2) * 0.52;
-      const hz = (-keyLz + 1);
-      const hLen = Math.hypot(keyLx, keyLy, hz);
-      const specDot = Math.max(0, (nx3 * keyLx + ny3 * keyLy + nz3 * hz) / hLen);
-      const spec = Math.pow(specDot, 18) * 0.46;
+      const absNz = nz3 < 0 ? -nz3 : nz3;
+      const rimBase = 1 - (absNz > 1 ? 1 : absNz);
+      const rim = rimBase * rimBase * 0.52;
+
+      const specDot = nx3 * halfLx + ny3 * halfLy + nz3 * halfLz;
+      let spec = 0;
+      if (specDot > 0) {
+        const s2 = specDot * specDot;
+        const s4 = s2 * s2;
+        const s8 = s4 * s4;
+        spec = s8 * s8 * s2 * 0.46;
+      }
 
       let lum = (0.10 + diffKey * 0.64 + diffFill * 0.20 + rim + spec) * p.ao;
-      lum = Math.max(0.03, Math.min(1.0, lum));
+      lum = lum < 0.03 ? 0.03 : (lum > 1.0 ? 1.0 : lum);
 
       const charIdx = Math.min(rampMax, Math.max(1, (lum * rampMax) | 0));
 
@@ -1734,26 +1780,16 @@ const stage3 = {
     ctx.fillStyle = '#0d0f14';
     ctx.fillRect(0, 0, inst.width, inst.height);
 
-    const aura = ctx.createRadialGradient(
-      inst.width * 0.5, inst.height * 0.42, 6,
-      inst.width * 0.5, inst.height * 0.42, Math.min(inst.width, inst.height) * 0.55
-    );
-    if (inst.type === 'rose') {
-      aura.addColorStop(0, 'rgba(175, 34, 48, 0.14)');
-    } else if (inst.type === 'moonflower') {
-      aura.addColorStop(0, 'rgba(165, 188, 235, 0.14)');
-    } else {
-      aura.addColorStop(0, 'rgba(201, 209, 224, 0.12)');
+    if (inst.auraGradient) {
+      ctx.fillStyle = inst.auraGradient;
+      ctx.fillRect(0, 0, inst.width, inst.height);
     }
-    aura.addColorStop(0.6, 'rgba(18, 20, 28, 0.05)');
-    aura.addColorStop(1, 'rgba(13, 15, 20, 0)');
-    ctx.fillStyle = aura;
-    ctx.fillRect(0, 0, inst.width, inst.height);
 
     const cellW = inst.cellW;
     const cellH = inst.cellH;
     const halfW = cellW * 0.5;
     const halfH = cellH * 0.5;
+    const colorLut = inst.colorLut;
     let lastStyle = '';
 
     for (let r = 0; r < rows; r++) {
@@ -1766,11 +1802,10 @@ const stage3 = {
           continue;
         }
 
-        const lum = inst.lumBuffer[idx];
+        const qIdx = (inst.lumBuffer[idx] * 22) | 0;
         const part = inst.partBuffer[idx];
         const ch = ramp[inst.charBuffer[idx]];
-        const quantizedLum = ((lum * 22) | 0) / 22;
-        const color = this.getFlowerCellColor(inst.type, quantizedLum, part);
+        const color = colorLut[part * 23 + qIdx];
 
         if (color !== lastStyle) {
           ctx.fillStyle = color;
@@ -1821,6 +1856,7 @@ const stage3 = {
       lumBuffer: null,
       partBuffer: null,
       charBuffer: null,
+      colorLut: this.buildAngelColorLut(),
       baseYaw: 0.24,
       yaw: 0.24,
       pitch: -0.22,
@@ -2456,6 +2492,16 @@ const stage3 = {
     return `rgb(${r},${g},${b})`;
   },
 
+  buildAngelColorLut() {
+    const lut = new Array(6 * 23);
+    for (let part = 0; part < 6; part++) {
+      for (let q = 0; q <= 22; q++) {
+        lut[part * 23 + q] = this.getAngelCellColor(q / 22, part);
+      }
+    }
+    return lut;
+  },
+
   renderWeepingAngelFrame(phase) {
     const inst = this.angelInstance;
     if (!inst || !inst.ctx || !inst.zBuffer) {
@@ -2488,6 +2534,12 @@ const stage3 = {
     const fillLx = -0.64;
     const fillLy = -0.22;
     const fillLz = -0.73;
+
+    const hz = -keyLz + 1;
+    const invHLen = 1 / Math.hypot(keyLx, keyLy, hz);
+    const halfLx = keyLx * invHLen;
+    const halfLy = keyLy * invHLen;
+    const halfLz = hz * invHLen;
 
     const fovScale = Math.max(inst.height * 1.18, Math.min(inst.width * 0.78, inst.height * 1.38));
     const camDist = 4.35;
@@ -2556,17 +2608,24 @@ const stage3 = {
         diffFill = 0;
       }
 
-      const rim = Math.pow(1 - Math.min(1, Math.abs(nz3)), 2.15) * 0.54;
-      const hz = (-keyLz + 1);
-      const hLen = Math.hypot(keyLx, keyLy, hz);
-      const specDot = Math.max(0, (nx3 * keyLx + ny3 * keyLy + nz3 * hz) / hLen);
-      const spec = Math.pow(specDot, 16) * 0.44;
+      const absNz = nz3 < 0 ? -nz3 : nz3;
+      const rimBase = 1 - (absNz > 1 ? 1 : absNz);
+      const rim = rimBase * rimBase * 0.54;
+
+      const specDot = nx3 * halfLx + ny3 * halfLy + nz3 * halfLz;
+      let spec = 0;
+      if (specDot > 0) {
+        const s2 = specDot * specDot;
+        const s4 = s2 * s2;
+        const s8 = s4 * s4;
+        spec = s8 * s8 * 0.44;
+      }
 
       let lum = (0.11 + diffKey * 0.63 + diffFill * 0.20 + rim + spec) * ao;
       if (part === 5) {
         lum = 0.96;
       }
-      lum = Math.max(0.03, Math.min(1.0, lum));
+      lum = lum < 0.03 ? 0.03 : (lum > 1.0 ? 1.0 : lum);
 
       const charIdx = part === 5
         ? rampMax
@@ -2630,6 +2689,7 @@ const stage3 = {
     const cellH = inst.cellH;
     const halfW = cellW * 0.5;
     const halfH = cellH * 0.5;
+    const colorLut = inst.colorLut;
     let lastStyle = '';
 
     for (let r = 0; r < rows; r++) {
@@ -2642,11 +2702,10 @@ const stage3 = {
           continue;
         }
 
-        const lum = inst.lumBuffer[idx];
+        const qIdx = (inst.lumBuffer[idx] * 22) | 0;
         const part = inst.partBuffer[idx];
         const ch = ramp[inst.charBuffer[idx]];
-        const quantizedLum = ((lum * 22) | 0) / 22;
-        const color = this.getAngelCellColor(quantizedLum, part);
+        const color = colorLut[part * 23 + qIdx];
 
         if (color !== lastStyle) {
           ctx.fillStyle = color;
