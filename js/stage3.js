@@ -39,6 +39,8 @@ const stage3 = {
   petalSprites: [],
   emberSprites: {},
   asciiFlowers: [],
+  angelInstance: null,
+  angelObserver: null,
   asciiCharRamp: " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$",
   revealObserver: null,
   timers: [],
@@ -77,10 +79,12 @@ const stage3 = {
       this.setupRevealObserver();
       this.resizeCanvas();
       this.initGalleryAsciiFlowers();
+      this.initWeepingAngel();
       this.isInitialized = true;
     } else {
       this.updateViewportMetrics();
       this.resizeGalleryAsciiFlowers();
+      this.resizeWeepingAngel();
     }
 
     window.scrollTo(0, 0);
@@ -199,6 +203,7 @@ const stage3 = {
 
     this.setText('stage3-wish-granted', i18n.t('stage3.candleWishGranted'));
     this.setText('stage3-wish-sub', i18n.t('stage3.candleWishSub'));
+    this.setText('stage3-angel-caption', i18n.t('stage3.angelCaption'));
   },
 
   setText(elementId, value) {
@@ -262,6 +267,7 @@ const stage3 = {
       this.updateViewportMetrics();
       this.resizeCanvas();
       this.resizeGalleryAsciiFlowers();
+      this.resizeWeepingAngel();
       if (!this.parallaxRafId && this.isActive && this.targetScrollY <= this.heroHeight * 1.45) {
         this.startParallaxLoop();
       }
@@ -1765,6 +1771,882 @@ const stage3 = {
         const ch = ramp[inst.charBuffer[idx]];
         const quantizedLum = ((lum * 22) | 0) / 22;
         const color = this.getFlowerCellColor(inst.type, quantizedLum, part);
+
+        if (color !== lastStyle) {
+          ctx.fillStyle = color;
+          lastStyle = color;
+        }
+
+        ctx.fillText(ch, c * cellW + halfW, yPos);
+      }
+    }
+  },
+
+  initWeepingAngel() {
+    if (!this.stageElement) {
+      return;
+    }
+
+    const canvas = document.getElementById('stage3-angel-canvas');
+    if (!canvas) {
+      return;
+    }
+
+    const ctx = canvas.getContext('2d', { alpha: true });
+    const points = this.generateWeepingAngelPoints();
+
+    const tears = [];
+    for (let i = 0; i < 6; i++) {
+      tears.push({
+        side: i % 2 === 0 ? -1 : 1,
+        phase: i / 6,
+        speed: 0.0042 + (i % 3) * 0.0008,
+        spreadX: ((i % 3) - 1) * 0.025
+      });
+    }
+
+    this.angelInstance = {
+      canvas,
+      ctx,
+      points,
+      tears,
+      width: 0,
+      height: 0,
+      dpr: 1,
+      cols: 0,
+      rows: 0,
+      cellW: 4.8,
+      cellH: 8.2,
+      zBuffer: null,
+      lumBuffer: null,
+      partBuffer: null,
+      charBuffer: null,
+      baseYaw: 0.24,
+      yaw: 0.24,
+      pitch: -0.22,
+      roll: 0.0,
+      breathPhase: 0,
+      isVisible: false,
+      rafId: null
+    };
+
+    this.setupWeepingAngelMetrics();
+    this.renderWeepingAngelFrame(0);
+
+    if ('IntersectionObserver' in window && !this.prefersReducedMotion) {
+      this.angelObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!this.angelInstance) {
+            return;
+          }
+          if (entry.isIntersecting) {
+            this.angelInstance.isVisible = true;
+            this.startWeepingAngelLoop();
+          } else {
+            this.angelInstance.isVisible = false;
+            if (this.angelInstance.rafId) {
+              cancelAnimationFrame(this.angelInstance.rafId);
+              this.angelInstance.rafId = null;
+            }
+          }
+        });
+      }, {
+        threshold: 0.05
+      });
+
+      this.angelObserver.observe(canvas);
+    } else if (!this.prefersReducedMotion) {
+      this.angelInstance.isVisible = true;
+      this.startWeepingAngelLoop();
+    }
+  },
+
+  resizeWeepingAngel() {
+    if (!this.angelInstance) {
+      return;
+    }
+    this.setupWeepingAngelMetrics();
+    this.renderWeepingAngelFrame(this.angelInstance.breathPhase);
+  },
+
+  setupWeepingAngelMetrics() {
+    const inst = this.angelInstance;
+    if (!inst || !inst.canvas) {
+      return;
+    }
+
+    const rect = inst.canvas.getBoundingClientRect();
+    const w = Math.max(320, Math.floor(rect.width || window.innerWidth || 1200));
+    const h = Math.max(420, Math.floor(rect.height || 680));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    inst.dpr = dpr;
+    inst.width = w;
+    inst.height = h;
+    inst.canvas.width = Math.floor(w * dpr);
+    inst.canvas.height = Math.floor(h * dpr);
+    inst.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    inst.cellW = w < 640 ? 4.6 : 5.4;
+    inst.cellH = w < 640 ? 7.8 : 9.0;
+    inst.cols = Math.max(60, Math.floor(w / inst.cellW));
+    inst.rows = Math.max(54, Math.floor(h / inst.cellH));
+
+    const total = inst.cols * inst.rows;
+    inst.zBuffer = new Float32Array(total);
+    inst.lumBuffer = new Float32Array(total);
+    inst.partBuffer = new Uint8Array(total);
+    inst.charBuffer = new Uint16Array(total);
+
+    const fontPx = Math.round(inst.cellH * 0.98);
+    inst.ctx.font = `600 ${fontPx}px ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", "Courier New", monospace`;
+    inst.ctx.textAlign = 'center';
+    inst.ctx.textBaseline = 'middle';
+  },
+
+  startWeepingAngelLoop() {
+    const inst = this.angelInstance;
+    if (!inst || inst.rafId) {
+      return;
+    }
+
+    const tick = () => {
+      if (!this.isActive || !inst.isVisible) {
+        inst.rafId = null;
+        return;
+      }
+
+      inst.breathPhase += 0.024;
+      for (let i = 0; i < inst.tears.length; i++) {
+        inst.tears[i].phase += inst.tears[i].speed;
+        if (inst.tears[i].phase > 1) {
+          inst.tears[i].phase -= 1;
+        }
+      }
+
+      this.renderWeepingAngelFrame(inst.breathPhase);
+      inst.rafId = requestAnimationFrame(tick);
+    };
+
+    inst.rafId = requestAnimationFrame(tick);
+  },
+
+  sampleAngelSurface(points, uSteps, vSteps, part, group, aoBase, weightFn, evalFn) {
+    const eps = 0.005;
+    for (let iu = 0; iu <= uSteps; iu++) {
+      const u = iu / uSteps;
+      for (let iv = 0; iv <= vSteps; iv++) {
+        const v = iv / vSteps;
+        const p = evalFn(u, v);
+        const pu = evalFn(Math.min(1, u + eps), v);
+        const pv = evalFn(u, Math.min(1, v + eps));
+
+        const tx = pu.x - p.x;
+        const ty = pu.y - p.y;
+        const tz = pu.z - p.z;
+
+        const bx = pv.x - p.x;
+        const by = pv.y - p.y;
+        const bz = pv.z - p.z;
+
+        let nx = ty * bz - tz * by;
+        let ny = tz * bx - tx * bz;
+        let nz = tx * by - ty * bx;
+
+        const cx = p.cx !== undefined ? p.cx : 0;
+        const cy = p.cy !== undefined ? p.cy : p.y;
+        const cz = p.cz !== undefined ? p.cz : 0;
+
+        const outDot = nx * (p.x - cx) + ny * (p.y - cy) + nz * (p.z - cz);
+        if (outDot < 0) {
+          nx = -nx;
+          ny = -ny;
+          nz = -nz;
+        }
+
+        const len = Math.hypot(nx, ny, nz) || 1;
+        const w = typeof weightFn === 'function' ? weightFn(u, v) : 1.0;
+        const ao = Math.max(0.18, Math.min(1.0, aoBase));
+
+        points.push({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          nx: nx / len,
+          ny: ny / len,
+          nz: nz / len,
+          part,
+          group,
+          ao,
+          w
+        });
+      }
+    }
+  },
+
+  addAngelTube(points, pathPts, radStart, radEnd, uSteps, vSteps, part, group, aoBase, weightFn) {
+    const evalBezier = (t) => {
+      if (pathPts.length === 3) {
+        const inv = 1 - t;
+        return {
+          x: inv * inv * pathPts[0].x + 2 * inv * t * pathPts[1].x + t * t * pathPts[2].x,
+          y: inv * inv * pathPts[0].y + 2 * inv * t * pathPts[1].y + t * t * pathPts[2].y,
+          z: inv * inv * pathPts[0].z + 2 * inv * t * pathPts[1].z + t * t * pathPts[2].z
+        };
+      }
+      const inv = 1 - t;
+      const c0 = inv * inv * inv;
+      const c1 = 3 * inv * inv * t;
+      const c2 = 3 * inv * t * t;
+      const c3 = t * t * t;
+      return {
+        x: c0 * pathPts[0].x + c1 * pathPts[1].x + c2 * pathPts[2].x + c3 * pathPts[3].x,
+        y: c0 * pathPts[0].y + c1 * pathPts[1].y + c2 * pathPts[2].y + c3 * pathPts[3].y,
+        z: c0 * pathPts[0].z + c1 * pathPts[1].z + c2 * pathPts[2].z + c3 * pathPts[3].z
+      };
+    };
+
+    this.sampleAngelSurface(points, uSteps, vSteps, part, group, aoBase, weightFn, (u, v) => {
+      const c = evalBezier(u);
+      const cNext = evalBezier(Math.min(1, u + 0.01));
+      let tx = cNext.x - c.x;
+      let ty = cNext.y - c.y;
+      let tz = cNext.z - c.z;
+      const tLen = Math.hypot(tx, ty, tz) || 1;
+      tx /= tLen;
+      ty /= tLen;
+      tz /= tLen;
+
+      let ux = 0;
+      let uy = 1;
+      let uz = 0;
+      if (Math.abs(ty) > 0.9) {
+        ux = 1;
+        uy = 0;
+      }
+
+      let px = ty * uz - tz * uy;
+      let py = tz * ux - tx * uz;
+      let pz = tx * uy - ty * ux;
+      const pLen = Math.hypot(px, py, pz) || 1;
+      px /= pLen;
+      py /= pLen;
+      pz /= pLen;
+
+      const qx = ty * pz - tz * py;
+      const qy = tz * px - tx * pz;
+      const qz = tx * py - ty * px;
+
+      const theta = v * Math.PI * 2;
+      const r = radStart + (radEnd - radStart) * u;
+      const cosT = Math.cos(theta);
+      const sinT = Math.sin(theta);
+
+      return {
+        x: c.x + (px * cosT + qx * sinT) * r,
+        y: c.y + (py * cosT + qy * sinT) * r,
+        z: c.z + (pz * cosT + qz * sinT) * r,
+        cx: c.x,
+        cy: c.y,
+        cz: c.z
+      };
+    });
+  },
+
+  generateWeepingAngelPoints() {
+    const points = [];
+
+    this.sampleAngelSurface(points, 14, 44, 1, 0, 0.72, null, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const y = -1.36 + u * 0.44;
+      const stepMold = u < 0.22 ? 1.16 : (u > 0.82 ? 1.04 : 0.96);
+      const fluting = 1 + 0.025 * Math.cos(16 * theta);
+      const r = 0.84 * stepMold * fluting;
+      return {
+        x: r * Math.cos(theta),
+        y,
+        z: -0.05 + r * Math.sin(theta) * 0.85,
+        cx: 0,
+        cy: y,
+        cz: -0.05
+      };
+    });
+
+    this.sampleAngelSurface(points, 10, 36, 1, 0, 0.78, null, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const r = u * 0.86;
+      return {
+        x: r * Math.cos(theta),
+        y: -0.92,
+        z: -0.05 + r * Math.sin(theta) * 0.85,
+        cx: 0,
+        cy: -1.1,
+        cz: -0.05
+      };
+    });
+
+    this.sampleAngelSurface(points, 32, 48, 0, 0, 0.88, (u) => u * 0.25, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const y = -1.24 + u * 0.88;
+      const frontBulge = Math.max(0, Math.sin(theta));
+      const kneeHeight = Math.exp(-Math.pow((u - 0.82) / 0.22, 2));
+      const baseRx = 0.62 - u * 0.24 + kneeHeight * 0.08;
+      const baseRz = 0.56 - u * 0.16 + frontBulge * (0.34 + kneeHeight * 0.16);
+      const pleats = (0.045 * Math.cos(11 * theta) + 0.025 * Math.sin(19 * theta)) * (1 - u * 0.45);
+      const centerShiftZ = -0.10 + u * 0.22 + frontBulge * 0.12;
+
+      return {
+        x: (baseRx + pleats) * Math.cos(theta),
+        y,
+        z: centerShiftZ + (baseRz + pleats) * Math.sin(theta),
+        cx: 0,
+        cy: y,
+        cz: centerShiftZ
+      };
+    });
+
+    [-1, 1].forEach((side) => {
+      this.addAngelTube(
+        points,
+        [
+          { x: side * 0.19, y: -0.78, z: -0.14 },
+          { x: side * 0.24, y: -0.52, z: 0.18 },
+          { x: side * 0.23, y: -0.32, z: 0.48 }
+        ],
+        0.17,
+        0.14,
+        18,
+        16,
+        0,
+        0,
+        0.90,
+        (u) => u * 0.3
+      );
+
+      this.addAngelTube(
+        points,
+        [
+          { x: side * 0.23, y: -0.32, z: 0.48 },
+          { x: side * 0.21, y: -0.72, z: 0.48 },
+          { x: side * 0.19, y: -1.16, z: 0.38 }
+        ],
+        0.14,
+        0.11,
+        20,
+        16,
+        0,
+        0,
+        0.88,
+        (u) => (1 - u) * 0.3
+      );
+    });
+
+    this.sampleAngelSurface(points, 28, 36, 0, 1, 0.92, (u) => 0.35 + 0.65 * u, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const y = -0.68 + u * 0.88;
+      const forwardLeanZ = -0.14 + Math.pow(u, 1.15) * 0.26;
+      const waistTaper = 0.86 + 0.24 * Math.sin(u * Math.PI * 0.85);
+      const rx = (0.31 + u * 0.11) * waistTaper;
+      const rz = (0.23 + u * 0.04) * waistTaper;
+      const robeFolds = 0.024 * Math.cos(9 * theta) * (1 - u * 0.3);
+
+      return {
+        x: (rx + robeFolds) * Math.cos(theta),
+        y,
+        z: forwardLeanZ + (rz + robeFolds) * Math.sin(theta),
+        cx: 0,
+        cy: y,
+        cz: forwardLeanZ
+      };
+    });
+
+    this.sampleAngelSurface(points, 12, 22, 0, 1, 0.88, () => 1.0, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const y = 0.16 + u * 0.18;
+      const z = 0.12 + u * 0.10;
+      const r = 0.125 * (1 - u * 0.15);
+      return {
+        x: r * Math.cos(theta),
+        y,
+        z: z + r * Math.sin(theta),
+        cx: 0,
+        cy: y,
+        cz: z
+      };
+    });
+
+    this.sampleAngelSurface(points, 24, 30, 0, 2, 0.96, () => 1.0, (u, v) => {
+      const phi = u * Math.PI;
+      const theta = v * Math.PI * 2;
+      const sinP = Math.sin(phi);
+      const cosP = Math.cos(phi);
+
+      const rx = 0.21;
+      const ry = 0.26;
+      const rz = 0.23;
+
+      let lx = rx * sinP * Math.cos(theta);
+      let ly = ry * cosP;
+      let lz = rz * sinP * Math.sin(theta);
+
+      const tilt = 0.56;
+      const cosT = Math.cos(tilt);
+      const sinT = Math.sin(tilt);
+      const ry2 = ly * cosT - lz * sinT;
+      const rz2 = ly * sinT + lz * cosT;
+
+      const hx = 0;
+      const hy = 0.44;
+      const hz = 0.28;
+
+      return {
+        x: hx + lx,
+        y: hy + ry2,
+        z: hz + rz2,
+        cx: hx,
+        cy: hy,
+        cz: hz
+      };
+    });
+
+    this.sampleAngelSurface(points, 24, 28, 0, 2, 0.94, () => 1.0, (u, v) => {
+      const s = (v - 0.5) * 2;
+      const angle = s * Math.PI * 0.82;
+      const y = 0.68 - u * 0.54;
+      const flare = 0.22 + Math.pow(u, 1.2) * 0.12;
+      const wave = 0.022 * Math.cos(s * Math.PI * 7) * u;
+      const zCenter = 0.24 - u * 0.06;
+
+      return {
+        x: (flare + wave) * Math.sin(angle),
+        y,
+        z: zCenter - (flare * 0.88 + wave) * Math.cos(angle) * 0.65,
+        cx: 0,
+        cy: y,
+        cz: zCenter
+      };
+    });
+
+    this.sampleAngelSurface(points, 8, 44, 4, 2, 1.0, () => 1.0, (u, v) => {
+      const theta = v * Math.PI * 2;
+      const tubePhi = u * Math.PI * 2;
+      const R = 0.36;
+      const r = 0.028;
+
+      let lx = (R + r * Math.cos(tubePhi)) * Math.cos(theta);
+      let ly = r * Math.sin(tubePhi);
+      let lz = (R + r * Math.cos(tubePhi)) * Math.sin(theta);
+
+      const tilt = 0.44;
+      const ry = ly * Math.cos(tilt) - lz * Math.sin(tilt);
+      const rz = ly * Math.sin(tilt) + lz * Math.cos(tilt);
+
+      return {
+        x: lx,
+        y: 0.72 + ry,
+        z: 0.22 + rz,
+        cx: R * Math.cos(theta),
+        cy: 0.72 - R * Math.sin(theta) * Math.sin(tilt),
+        cz: 0.22 + R * Math.sin(theta) * Math.cos(tilt)
+      };
+    });
+
+    [-1, 1].forEach((side) => {
+      this.addAngelTube(
+        points,
+        [
+          { x: side * 0.38, y: 0.14, z: 0.08 },
+          { x: side * 0.40, y: -0.06, z: 0.28 },
+          { x: side * 0.28, y: -0.24, z: 0.48 }
+        ],
+        0.115,
+        0.095,
+        20,
+        16,
+        2,
+        3,
+        0.95,
+        (u) => 0.7 + 0.3 * u
+      );
+
+      this.addAngelTube(
+        points,
+        [
+          { x: side * 0.28, y: -0.24, z: 0.48 },
+          { x: side * 0.23, y: 0.04, z: 0.54 },
+          { x: side * 0.13, y: 0.28, z: 0.50 }
+        ],
+        0.092,
+        0.072,
+        20,
+        16,
+        2,
+        3,
+        0.98,
+        () => 1.0
+      );
+
+      this.sampleAngelSurface(points, 14, 14, 2, 3, 1.0, () => 1.0, (u, v) => {
+        const s = (v - 0.5) * 2;
+        const palmW = 0.085 * Math.sin(Math.pow(u, 0.65) * Math.PI);
+        const fingerRibs = 0.014 * Math.cos(s * Math.PI * 4) * Math.pow(u, 0.8);
+        const curveIn = -side * (0.14 - u * 0.07) + s * palmW * 0.35;
+        const py = 0.27 + u * 0.19;
+        const pz = 0.49 - Math.pow(u, 1.5) * 0.06 + Math.abs(s) * 0.02 + fingerRibs;
+
+        return {
+          x: curveIn,
+          y: py,
+          z: pz,
+          cx: 0,
+          cy: 0.38,
+          cz: 0.32
+        };
+      });
+    });
+
+    [-1, 1].forEach((side) => {
+      const wingGroup = side < 0 ? 4 : 5;
+
+      this.addAngelTube(
+        points,
+        [
+          { x: side * 0.16, y: 0.16, z: -0.06 },
+          { x: side * 0.78, y: 1.06, z: -0.24 },
+          { x: side * 1.62, y: 1.32, z: -0.10 },
+          { x: side * 1.98, y: 0.36, z: 0.16 }
+        ],
+        0.105,
+        0.048,
+        36,
+        14,
+        3,
+        wingGroup,
+        0.98,
+        (u) => 0.35 + 0.65 * u
+      );
+
+      const featherCount = 18;
+      for (let f = 0; f < featherCount; f++) {
+        const t = f / (featherCount - 1);
+
+        const inv = 1 - t;
+        const c0 = inv * inv * inv;
+        const c1 = 3 * inv * inv * t;
+        const c2 = 3 * inv * t * t;
+        const c3 = t * t * t;
+
+        const rootX = c0 * (side * 0.16) + c1 * (side * 0.78) + c2 * (side * 1.62) + c3 * (side * 1.98);
+        const rootY = c0 * 0.16 + c1 * 1.06 + c2 * 1.32 + c3 * 0.36;
+        const rootZ = c0 * (-0.06) + c1 * (-0.24) + c2 * (-0.10) + c3 * 0.16;
+
+        const featherLen = 0.80 + Math.sin(t * Math.PI) * 0.66 + t * 0.28;
+        const featherWidth = 0.095 + t * 0.04;
+        const sweepOutX = side * (0.20 + Math.sin(t * Math.PI) * 0.32 - t * 0.14);
+        const curlForwardZ = 0.12 + t * 0.34;
+
+        this.sampleAngelSurface(
+          points,
+          22,
+          8,
+          3,
+          wingGroup,
+          0.90 + 0.10 * (1 - t * 0.5),
+          (u) => 0.3 + 0.7 * (t * 0.6 + u * 0.4),
+          (u, v) => {
+            const s = (v - 0.5) * 2;
+            const blade = Math.sin(Math.pow(u, 0.7) * Math.PI);
+            const w = s * featherWidth * blade;
+            const ridge = (1 - Math.abs(s)) * 0.032 * blade;
+
+            const fx = rootX + sweepOutX * u + side * ridge;
+            const fy = rootY - u * featherLen;
+            const fz = rootZ + Math.pow(u, 1.45) * curlForwardZ + w;
+
+            return {
+              x: fx,
+              y: fy,
+              z: fz,
+              cx: 0,
+              cy: fy,
+              cz: 0.1
+            };
+          }
+        );
+      }
+
+      const innerFeatherCount = 12;
+      for (let f = 0; f < innerFeatherCount; f++) {
+        const t = f / (innerFeatherCount - 1);
+        const rootX = side * (0.22 + t * 1.12);
+        const rootY = 0.22 + Math.sin(t * Math.PI * 0.85) * 0.76;
+        const rootZ = -0.10 - Math.sin(t * Math.PI) * 0.12;
+        const featherLen = 0.58 + Math.sin(t * Math.PI) * 0.44;
+
+        this.sampleAngelSurface(
+          points,
+          16,
+          6,
+          3,
+          wingGroup,
+          0.84,
+          (u) => 0.3 + 0.5 * (t + u),
+          (u, v) => {
+            const s = (v - 0.5) * 2;
+            const blade = Math.sin(Math.pow(u, 0.7) * Math.PI);
+            const w = s * 0.085 * blade;
+
+            return {
+              x: rootX + side * (u * 0.16 + (1 - Math.abs(s)) * 0.025),
+              y: rootY - u * featherLen,
+              z: rootZ + u * u * 0.16 + w,
+              cx: 0,
+              cy: rootY - u * featherLen,
+              cz: 0.1
+            };
+          }
+        );
+      }
+    });
+
+    return points;
+  },
+
+  getAngelCellColor(lum, part) {
+    const l = Math.max(0, Math.min(1, lum));
+
+    if (part === 5) {
+      const r = Math.round(145 + 110 * Math.pow(l, 0.7));
+      const g = Math.round(180 + 75 * Math.pow(l, 0.7));
+      const b = Math.round(230 + 25 * Math.pow(l, 0.6));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (part === 4) {
+      const r = Math.round(75 + 180 * Math.pow(l, 0.82));
+      const g = Math.round(72 + 175 * Math.pow(l, 0.86));
+      const b = Math.round(62 + 165 * Math.pow(l, 0.92));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (part === 3) {
+      const r = Math.round(32 + 216 * Math.pow(l, 0.88));
+      const g = Math.round(36 + 214 * Math.pow(l, 0.88));
+      const b = Math.round(48 + 206 * Math.pow(l, 0.84));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (part === 2) {
+      const r = Math.round(40 + 210 * Math.pow(l, 0.85));
+      const g = Math.round(42 + 206 * Math.pow(l, 0.87));
+      const b = Math.round(52 + 198 * Math.pow(l, 0.86));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    if (part === 1) {
+      const r = Math.round(20 + 135 * Math.pow(l, 1.05));
+      const g = Math.round(22 + 142 * Math.pow(l, 1.02));
+      const b = Math.round(30 + 155 * Math.pow(l, 0.98));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    const r = Math.round(28 + 205 * Math.pow(l, 0.92));
+    const g = Math.round(32 + 205 * Math.pow(l, 0.90));
+    const b = Math.round(42 + 202 * Math.pow(l, 0.86));
+    return `rgb(${r},${g},${b})`;
+  },
+
+  renderWeepingAngelFrame(phase) {
+    const inst = this.angelInstance;
+    if (!inst || !inst.ctx || !inst.zBuffer) {
+      return;
+    }
+
+    const cols = inst.cols;
+    const rows = inst.rows;
+    inst.zBuffer.fill(-1e9);
+
+    const rawWave = (Math.sin(phase) + 1) * 0.5;
+    const breath = Math.pow(rawWave, 1.35);
+    const tremor = Math.sin(phase * 7.5) * 0.005 * Math.pow(breath, 2.2);
+
+    const yaw = inst.baseYaw + Math.sin(phase * 0.35) * 0.085;
+    const pitch = inst.pitch + breath * 0.025;
+    const roll = Math.sin(phase * 0.35) * 0.02;
+
+    const cosY = Math.cos(yaw);
+    const sinY = Math.sin(yaw);
+    const cosX = Math.cos(pitch);
+    const sinX = Math.sin(pitch);
+    const cosZ = Math.cos(roll);
+    const sinZ = Math.sin(roll);
+
+    const keyLx = 0.52;
+    const keyLy = 0.72;
+    const keyLz = -0.46;
+
+    const fillLx = -0.64;
+    const fillLy = -0.22;
+    const fillLz = -0.73;
+
+    const fovScale = Math.max(inst.height * 1.18, Math.min(inst.width * 0.78, inst.height * 1.38));
+    const camDist = 4.35;
+    const centerYOffset = -0.04;
+
+    const invCellW = 1 / inst.cellW;
+    const invCellH = 1 / inst.cellH;
+    const ramp = this.asciiCharRamp;
+    const rampMax = ramp.length - 1;
+
+    const plotPoint = (px, py, pz, nx, ny, nz, part, ao) => {
+      const py0 = py - centerYOffset;
+
+      const x1 = px * cosY + pz * sinY;
+      const z1 = -px * sinY + pz * cosY;
+      const y1 = py0;
+
+      const x2 = x1 * cosZ - y1 * sinZ;
+      const y2 = x1 * sinZ + y1 * cosZ;
+      const z2 = z1;
+
+      const y3 = y2 * cosX - z2 * sinX;
+      const z3 = y2 * sinX + z2 * cosX;
+      const x3 = x2;
+
+      const depth = camDist - z3;
+      if (depth <= 0.4) {
+        return;
+      }
+
+      const proj = fovScale / depth;
+      const screenX = inst.width * 0.5 + x3 * proj;
+      const screenY = inst.height * 0.50 - y3 * proj;
+
+      const col = (screenX * invCellW) | 0;
+      const row = (screenY * invCellH) | 0;
+
+      if (col < 0 || col >= cols || row < 0 || row >= rows) {
+        return;
+      }
+
+      const idx = row * cols + col;
+      if (z3 <= inst.zBuffer[idx]) {
+        return;
+      }
+
+      const nx1 = nx * cosY + nz * sinY;
+      const nz1 = -nx * sinY + nz * cosY;
+      const ny1 = ny;
+
+      const nx2 = nx1 * cosZ - ny1 * sinZ;
+      const ny2 = nx1 * sinZ + ny1 * cosZ;
+      const nz2 = nz1;
+
+      const ny3 = ny2 * cosX - nz2 * sinX;
+      const nz3 = ny2 * sinX + nz2 * cosX;
+      const nx3 = nx2;
+
+      let diffKey = nx3 * keyLx + ny3 * keyLy - nz3 * keyLz;
+      if (diffKey < 0) {
+        diffKey = -diffKey * 0.32;
+      }
+
+      let diffFill = nx3 * fillLx + ny3 * fillLy - nz3 * fillLz;
+      if (diffFill < 0) {
+        diffFill = 0;
+      }
+
+      const rim = Math.pow(1 - Math.min(1, Math.abs(nz3)), 2.15) * 0.54;
+      const hz = (-keyLz + 1);
+      const hLen = Math.hypot(keyLx, keyLy, hz);
+      const specDot = Math.max(0, (nx3 * keyLx + ny3 * keyLy + nz3 * hz) / hLen);
+      const spec = Math.pow(specDot, 16) * 0.44;
+
+      let lum = (0.11 + diffKey * 0.63 + diffFill * 0.20 + rim + spec) * ao;
+      if (part === 5) {
+        lum = 0.96;
+      }
+      lum = Math.max(0.03, Math.min(1.0, lum));
+
+      const charIdx = part === 5
+        ? rampMax
+        : Math.min(rampMax, Math.max(1, (lum * rampMax) | 0));
+
+      inst.zBuffer[idx] = z3;
+      inst.lumBuffer[idx] = lum;
+      inst.partBuffer[idx] = part;
+      inst.charBuffer[idx] = charIdx;
+    };
+
+    const pts = inst.points;
+    const nPts = pts.length;
+
+    for (let i = 0; i < nPts; i++) {
+      const p = pts[i];
+      let px = p.x;
+      let py = p.y;
+      let pz = p.z;
+      const w = p.w;
+
+      if (p.group === 1) {
+        py += breath * 0.055 * w + tremor;
+        pz += breath * 0.042 * w;
+        px *= (1 + breath * 0.035 * w);
+      } else if (p.group === 2) {
+        py += breath * 0.052 + tremor * 1.4;
+        pz += breath * 0.048;
+      } else if (p.group === 3) {
+        py += (breath * 0.058 + tremor * 1.6) * w;
+        pz += breath * 0.044 * w;
+      } else if (p.group === 4) {
+        px -= breath * 0.085 * w;
+        py += breath * 0.095 * w;
+        pz -= breath * 0.045 * w;
+      } else if (p.group === 5) {
+        px += breath * 0.085 * w;
+        py += breath * 0.095 * w;
+        pz -= breath * 0.045 * w;
+      }
+
+      plotPoint(px, py, pz, p.nx, p.ny, p.nz, p.part, p.ao);
+    }
+
+    for (let i = 0; i < inst.tears.length; i++) {
+      const tear = inst.tears[i];
+      const t = tear.phase;
+      const tx = tear.side * 0.095 + tear.spreadX;
+      const ty = 0.27 - t * 0.78 + breath * 0.04;
+      const tz = 0.50 + Math.sin(t * Math.PI) * 0.03 + breath * 0.04;
+
+      for (let dy = -0.02; dy <= 0.02; dy += 0.02) {
+        plotPoint(tx, ty + dy, tz, 0, 0.3, -0.95, 5, 1.0);
+      }
+    }
+
+    const ctx = inst.ctx;
+    ctx.clearRect(0, 0, inst.width, inst.height);
+
+    const cellW = inst.cellW;
+    const cellH = inst.cellH;
+    const halfW = cellW * 0.5;
+    const halfH = cellH * 0.5;
+    let lastStyle = '';
+
+    for (let r = 0; r < rows; r++) {
+      const rowOffset = r * cols;
+      const yPos = r * cellH + halfH;
+
+      for (let c = 0; c < cols; c++) {
+        const idx = rowOffset + c;
+        if (inst.zBuffer[idx] <= -1e8) {
+          continue;
+        }
+
+        const lum = inst.lumBuffer[idx];
+        const part = inst.partBuffer[idx];
+        const ch = ramp[inst.charBuffer[idx]];
+        const quantizedLum = ((lum * 22) | 0) / 22;
+        const color = this.getAngelCellColor(quantizedLum, part);
 
         if (color !== lastStyle) {
           ctx.fillStyle = color;
