@@ -5,14 +5,11 @@ const i18n = {
     uk: {
       metaTitle: "Ксюшааа, з 18-річчям!",
       stage1: {
-        badge: "18TH ANNIVERSARY",
         heading: "Оберіть мову"
       },
       stage2: {
         tapHint: "Торкнися яйця",
-        cracking: "Ще трохи...",
-        counterPrefix: "З твоїм",
-        counterSuffix: "-ти річчям"
+        cracking: "Ще трохи..."
       },
       stage3: {
         heroPrefix: "З твоїм",
@@ -84,21 +81,17 @@ const i18n = {
         candleAction: "Задути свічку",
         candleExtinguishedAction: "Свічку погашено",
         candleWishGranted: "Почув, роднєнька, запишемо на олівчик. Нехай твоє найзаповітніше бажання обов'язково здійсниться, Ксюша!",
-        candleWishSub: "З 18-річчям!",
-        angelCaption: "МОВЧАЗНИЙ СТРАЖ • XVIII"
+        candleWishSub: "З 18-річчям!"
       }
     },
     ru: {
       metaTitle: "Ксюшааа, с 18-летием!",
       stage1: {
-        badge: "18TH ANNIVERSARY",
         heading: "Выберите язык"
       },
       stage2: {
         tapHint: "Коснись яйца",
-        cracking: "Ещё чуть-чуть...",
-        counterPrefix: "С твоим",
-        counterSuffix: "-ти летием"
+        cracking: "Ещё чуть-чуть..."
       },
       stage3: {
         heroPrefix: "С твоим",
@@ -170,8 +163,7 @@ const i18n = {
         candleAction: "Задуть свечу",
         candleExtinguishedAction: "Свеча погашена",
         candleWishGranted: "Услышал родная, запишем на карандашик. Пусть твоё самое заветное желание обязательно исполнится, Ксюша!",
-        candleWishSub: "С 18-летием!",
-        angelCaption: "БЕЗМОЛВНЫЙ СТРАЖ • XVIII"
+        candleWishSub: "С 18-летием!"
       }
     }
   },
