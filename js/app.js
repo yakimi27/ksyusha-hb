@@ -1,5 +1,20 @@
 const app = {
   currentStage: 1,
+  audioCtx: null,
+
+  getAudioContext() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return null;
+    }
+    if (!this.audioCtx) {
+      this.audioCtx = new AudioContextClass();
+    }
+    if (this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume();
+    }
+    return this.audioCtx;
+  },
 
   init() {
     if (typeof i18n !== 'undefined') {
