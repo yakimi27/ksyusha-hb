@@ -13,12 +13,12 @@ const stage2 = {
   maxClicks: 5,
   totalCards: 18,
   isShattered: false,
+  isAlignedPhase: false,
   isInitialized: false,
   lastTouchTime: 0,
   crunchTimer: null,
   sequenceTimers: [],
   cardElements: [],
-  audioCtx: null,
   preloadedImages: [],
 
   photoSources: [
@@ -79,6 +79,7 @@ const stage2 = {
     this.clearTimers();
     this.clickCount = 0;
     this.isShattered = false;
+    this.isAlignedPhase = false;
     this.cardElements = [];
 
     if (this.stageElement) {
@@ -122,7 +123,7 @@ const stage2 = {
     }
 
     if (this.counterFocal) {
-      this.counterFocal.classList.remove('is-active', 'is-bumping', 'is-complete', 'is-fading-away', 'is-handed-off');
+      this.counterFocal.classList.remove('is-active', 'is-bumping', 'is-complete', 'is-handed-off');
     }
 
     if (this.counterValue) {
@@ -162,6 +163,12 @@ const stage2 = {
 
     this.eggTrigger.addEventListener('touchstart', onTouchStart, { passive: false });
     this.eggTrigger.addEventListener('click', onClick);
+
+    window.addEventListener('resize', () => {
+      if (this.isAlignedPhase && this.cardElements.length > 0) {
+        this.alignCardsInFormation();
+      }
+    }, { passive: true });
   },
 
   handleEggInteraction() {
@@ -465,6 +472,7 @@ const stage2 = {
   },
 
   alignCardsInFormation() {
+    this.isAlignedPhase = true;
     const layout = this.computeCardDimensions();
     const totalGridW = layout.cols * layout.cardW + (layout.cols - 1) * layout.gapX;
     const totalGridH = layout.rows * layout.cardH + (layout.rows - 1) * layout.gapY;
@@ -500,10 +508,14 @@ const stage2 = {
   },
 
   aggregateCardsToCounter() {
+    this.isAlignedPhase = false;
     if (this.counterFocal) {
       this.counterFocal.classList.add('is-active');
     }
 
+    const focalOffset = this.getFocalCounterOffset();
+    const targetX = `${focalOffset.x.toFixed(1)}px`;
+    const targetY = `${focalOffset.y.toFixed(1)}px`;
     const stepInterval = 90;
     const flightDuration = 340;
     let currentCounter = 0;
@@ -512,12 +524,11 @@ const stage2 = {
       const launchDelay = index * stepInterval;
 
       const launchTimer = setTimeout(() => {
-        const focalOffset = this.getFocalCounterOffset();
         card.classList.remove('is-aligned');
         card.classList.add('is-particle');
         card.style.setProperty('--card-dur', `${flightDuration}ms`);
-        card.style.setProperty('--card-x', `${focalOffset.x.toFixed(1)}px`);
-        card.style.setProperty('--card-y', `${focalOffset.y.toFixed(1)}px`);
+        card.style.setProperty('--card-x', targetX);
+        card.style.setProperty('--card-y', targetY);
         card.style.setProperty('--card-rot', '0deg');
         card.style.setProperty('--card-scale', '0.26');
       }, launchDelay);
@@ -612,65 +623,61 @@ const stage2 = {
     }
 
     try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) {
+      const ctx = (typeof app !== 'undefined' && typeof app.getAudioContext === 'function')
+        ? app.getAudioContext()
+        : null;
+      if (!ctx) {
         return;
       }
-      if (!this.audioCtx) {
-        this.audioCtx = new AudioContextClass();
-      }
-      if (this.audioCtx.state === 'suspended') {
-        this.audioCtx.resume();
-      }
 
-      const now = this.audioCtx.currentTime;
+      const now = ctx.currentTime;
 
       if (type === 'crunch') {
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(140 + step * 28, now);
         osc.frequency.exponentialRampToValueAtTime(55, now + 0.085);
         gain.gain.setValueAtTime(0.14, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
         osc.connect(gain);
-        gain.connect(this.audioCtx.destination);
+        gain.connect(ctx.destination);
         osc.start(now);
         osc.stop(now + 0.095);
       } else if (type === 'burst') {
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(240, now);
         osc.frequency.exponentialRampToValueAtTime(68, now + 0.24);
         gain.gain.setValueAtTime(0.22, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
         osc.connect(gain);
-        gain.connect(this.audioCtx.destination);
+        gain.connect(ctx.destination);
         osc.start(now);
         osc.stop(now + 0.26);
       } else if (type === 'tick') {
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(320 + step * 24, now);
         osc.frequency.exponentialRampToValueAtTime(380 + step * 26, now + 0.045);
         gain.gain.setValueAtTime(0.06, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
         osc.connect(gain);
-        gain.connect(this.audioCtx.destination);
+        gain.connect(ctx.destination);
         osc.start(now);
         osc.stop(now + 0.055);
       } else if (type === 'complete') {
-        const osc = this.audioCtx.createOscillator();
-        const gain = this.audioCtx.createGain();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(528, now);
         osc.frequency.exponentialRampToValueAtTime(880, now + 0.38);
         gain.gain.setValueAtTime(0.16, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
         osc.connect(gain);
-        gain.connect(this.audioCtx.destination);
+        gain.connect(ctx.destination);
         osc.start(now);
         osc.stop(now + 0.44);
       }
