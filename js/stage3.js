@@ -389,16 +389,16 @@ const stage3 = {
       batEl.innerHTML = `
         <svg class="bat-svg" viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg">
           <g class="bat-wing-left">
-            <path d="M50,26 C38,8 16,2 1,14 C12,20 18,28 15,40 C26,32 35,34 41,43 C44,35 47,31 50,32 Z" fill="#1b090e" stroke="#ff5c5e" stroke-width="1.65" />
+            <path d="M50,26 C38,8 16,2 1,14 C12,20 18,28 15,40 C26,32 35,34 41,43 C44,35 47,31 50,32 Z" fill="#14161c" stroke="#c9d1e0" stroke-width="1.65" />
           </g>
           <g class="bat-wing-right">
-            <path d="M50,26 C62,8 84,2 99,14 C88,20 82,28 85,40 C74,32 65,34 59,43 C56,35 53,31 50,32 Z" fill="#1b090e" stroke="#ff5c5e" stroke-width="1.65" />
+            <path d="M50,26 C62,8 84,2 99,14 C88,20 82,28 85,40 C74,32 65,34 59,43 C56,35 53,31 50,32 Z" fill="#14161c" stroke="#c9d1e0" stroke-width="1.65" />
           </g>
-          <ellipse cx="50" cy="29" rx="6" ry="10" fill="#14070b" stroke="rgba(255, 107, 107, 0.45)" stroke-width="0.9" />
-          <polygon points="45.5,21 43,10 49,19" fill="#14070b" />
-          <polygon points="54.5,21 57,10 51,19" fill="#14070b" />
-          <circle cx="47.8" cy="22" r="1.4" fill="#ff8585" />
-          <circle cx="52.2" cy="22" r="1.4" fill="#ff8585" />
+          <ellipse cx="50" cy="29" rx="6" ry="10" fill="#0b0c10" stroke="rgba(201, 209, 224, 0.45)" stroke-width="0.9" />
+          <polygon points="45.5,21 43,10 49,19" fill="#0b0c10" />
+          <polygon points="54.5,21 57,10 51,19" fill="#0b0c10" />
+          <circle cx="47.8" cy="22" r="1.4" fill="#f4f1e8" />
+          <circle cx="52.2" cy="22" r="1.4" fill="#f4f1e8" />
         </svg>
       `;
 
@@ -647,10 +647,10 @@ const stage3 = {
     const vw = window.innerWidth || 375;
     const vh = window.innerHeight || 667;
     const colors = [
-      { main: '#b11226', edge: '#d9383a' },
-      { main: '#8c0b1c', edge: '#b11226' },
-      { main: '#d9383a', edge: '#ff6b6b' },
-      { main: '#640713', edge: '#9e1122' }
+      { main: '#c9d1e0', edge: '#f4f1e8' },
+      { main: '#8e93a3', edge: '#c9d1e0' },
+      { main: '#f4f1e8', edge: '#ffffff' },
+      { main: '#2a2d38', edge: '#8e93a3' }
     ];
     const palette = colors[Math.floor(Math.random() * colors.length)];
 
@@ -685,7 +685,7 @@ const stage3 = {
       swayPhase: Math.random() * Math.PI * 2,
       swaySpeed: 0.018 + Math.random() * 0.02,
       pulsePhase: Math.random() * Math.PI * 2,
-      color: Math.random() > 0.45 ? '#ff6b6b' : '#ff9e7d'
+      color: Math.random() > 0.45 ? '#f4f1e8' : '#c9d1e0'
     };
   },
 
@@ -741,7 +741,7 @@ const stage3 = {
         ctx.save();
         ctx.globalAlpha = alpha;
         ctx.fillStyle = ember.color;
-        ctx.shadowColor = '#d9383a';
+        ctx.shadowColor = 'rgba(233, 238, 255, 0.35)';
         ctx.shadowBlur = 8;
         ctx.beginPath();
         ctx.arc(ember.x, ember.y, ember.radius, 0, Math.PI * 2);

@@ -1,15 +1,27 @@
 :root {
-  --bg-primary: #0c0c0e;
-  --surface-card: #16161a;
-  --border-subtle: #2a2a32;
-  --accent-primary: #d9383a;
-  --accent-deep: #b11226;
-  --accent-secondary: #ff6b6b;
+  --bg-primary: #0b0c10;
+  --surface-card: #14161c;
+  --border-subtle: #2a2d38;
+  --moon-white: #f4f1e8;
+  --moon-silver: #c9d1e0;
+  --moon-glow: rgba(233, 238, 255, 0.35);
+  --moon-mist: rgba(201, 209, 224, 0.08);
+  --accent-primary: #f4f1e8;
+  --accent-deep: #8e93a3;
+  --accent-secondary: #c9d1e0;
   --text-primary: #f0f0f2;
-  --text-secondary: #8e8e99;
+  --text-secondary: #8e93a3;
+  --flame-core: #ffd7b0;
+  --flame-body: #ff6b6b;
+  --flame-edge: #d9383a;
   --font-serif: "Playfair Display", "Cormorant Garamond", Georgia, "Times New Roman", serif;
   --font-mono: ui-monospace, "SF Mono", "Courier New", monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+::selection {
+  background: #c9d1e0;
+  color: #0b0c10;
 }
 
 *, *::before, *::after {
